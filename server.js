@@ -4,21 +4,31 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
 const app = express();
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', ...
+
+// Middleware FIRST
 app.use(cors());
 app.use(express.json());
 
+// DB
 const pool = mysql.createPool(process.env.MYSQL_URL);
 console.log("Connecting...");
 
 pool.getConnection().then(c => {
   console.log("✅ DB Connected!");
   c.release();
+}).catch(err => {
+  console.error("❌ DB Failed:", err.message);
 });
 
-// REGISTER - simple
+// Health check for Railway
+app.get('/', (req, res) => {
+  res.send('Clandeck Backend Running!');
+});
+
+// REGISTER
 app.post('/api/register', async (req, res) => {
   const { id, name, email, password } = req.body;
   try {
@@ -32,7 +42,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// LOGIN - direct check, id display
+// LOGIN
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -48,4 +58,6 @@ app.post('/api/login', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-app.listen(PORT, '0.0.0.0', () => console.log(`Running on ${PORT}`))
+
+// Listen ONCE at the end
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT}`));
