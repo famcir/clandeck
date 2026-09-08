@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 const app = express();
+const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
@@ -46,5 +47,4 @@ app.post('/api/login', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-app.listen(3000, () => console.log("✅ Backend running on 3000"));
+app.listen(PORT, '0.0.0.0', () => console.log(`Running on ${PORT}`))
