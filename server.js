@@ -2,18 +2,23 @@ import express from 'express';
 import mysql from 'mysql2/promise';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Middleware FIRST
 app.use(cors());
 app.use(express.json());
 
 // DB
-const pool = mysql.createPool(process.env.MYSQL_URL);
+const pool = mysql.createPool(process.env.MYSQL_URL || process.env.DATABASE_URL);
 console.log("Connecting...");
 
 pool.getConnection().then(c => {
@@ -23,16 +28,15 @@ pool.getConnection().then(c => {
   console.error("❌ DB Failed:", err.message);
 });
 
-// Health check for Railway
-app.get('/', (req, res) => {
+// API Routes
+app.get('/api', (req, res) => {
   res.send('Clandeck Backend Running!');
 });
 
-// REGISTER
 app.post('/api/register', async (req, res) => {
   const { id, name, email, password } = req.body;
   try {
-    const [result] = await pool.execute(
+    await pool.execute(
       "INSERT INTO users (id, name, email, password, status) VALUES (?,?,?,?,?)",
       [id, name, email, password, 'active']
     );
@@ -42,7 +46,6 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// LOGIN
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -51,7 +54,6 @@ app.post('/api/login', async (req, res) => {
       [email, password]
     );
     if (rows.length === 0) return res.status(400).json({ error: "Wrong email or password" });
-
     const user = rows[0];
     res.json({ message: "Login success", id: user.id, name: user.name, email: user.email });
   } catch (err) {
@@ -59,5 +61,24 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Listen ONCE at the end
+// Serve Frontend - auto detect dist / build / client/dist
+const possiblePaths = ['dist', 'build', 'client/dist', 'frontend/dist'];
+let frontendPath = null;
+for (const p of possiblePaths) {
+  if (fs.existsSync(path.join(__dirname, p))) {
+    frontendPath = path.join(__dirname, p);
+    break;
+  }
+}
+
+if (frontendPath) {
+  console.log(`Serving frontend from ${frontendPath}`);
+  app.use(express.static(frontendPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+  });
+} else {
+  app.get('/', (req, res) => res.send('Clandeck Backend Running! - Build your frontend'));
+}
+
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT}`));
