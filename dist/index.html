@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ClanDeck.com</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  #landing{height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;background:#fafafa;font-family:Arial,sans-serif;position:fixed;top:0;left:0;width:100%;z-index:9999;transition:0.6s}
+  #landing.hide{transform:translateY(-100%);opacity:0;pointer-events:none}
+  #landing img{width:280px;animation:float 3s infinite ease-in-out}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  #landing p{color:#999;letter-spacing:2px;text-transform:uppercase;font-size:14px;margin-top:20px}
+  .dots{cursor:pointer;color:#C8A86A;font-weight:bold;letter-spacing:4px;margin-left:4px;transition:0.3s;display:inline-block}
+  .dots:hover{color:#000;transform:scale(1.3)}
+  #root{display:none}
+  #root.show{display:block}
+</style>
+  <script type="module" crossorigin src="/assets/index-WTxnOsjY.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BI55Afs-.css">
+</head>
+<body>
+
+<!-- 1. FIRST PAGE - HTML LANDING -->
+<div id="landing">
+  <img src="/clandeck-logo-h.png" alt="ClanDeck">
+  <p>Working under progress<span class="dots" id="enterBtn">..</span></p>
+</div>
+
+<!-- 2. SECOND PAGE - REACT APP (App.jsx) -->
+<div id="root"></div>
+
+<script>
+  const btn = document.getElementById('enterBtn');
+  const landing = document.getElementById('landing');
+  const root = document.getElementById('root');
+
+  btn.onclick = () => {
+    landing.classList.add('hide');
+    setTimeout(()=>{
+      root.classList.add('show');
+    },300);
+  }
+</script>
+
+</body>
+</html>
