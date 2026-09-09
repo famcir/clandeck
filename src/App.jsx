@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './App.css';
 import logo from './assets/clandeck-logo.png';
-import Profile from './Profile'; // Import Profile
+import Profile from './Profile';
 
 export default function App() {
   const [username, setUsername] = useState("");
@@ -24,16 +24,27 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      const res = await fetch(`${API_URL}/api/login`, {
+      // FIXED: Works for both localhost and Railway
+      // If VITE_API_URL is /api or https://www.clandeck.com/api, we remove trailing /api
+      let rawUrl = (import.meta.env.VITE_API_URL || '').trim();
+      rawUrl = rawUrl.replace(/\/$/, ''); // remove trailing slash
+      const baseUrl = rawUrl.replace(/\/api$/, ''); // remove /api if user set it
+      // Now baseUrl is '' on Railway, or 'http://localhost:8080' locally
+
+      const res = await fetch(`${baseUrl}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: username.trim(), password })
       });
+
       const text = await res.text();
       let data;
-      try { data = JSON.parse(text); }
-      catch { throw new Error("Backend is not running. Run 'node server.js'"); }
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // FIXED: Show real error, not fake backend message
+        throw new Error(text || `Server returned: ${res.status} - Please try again`);
+      }
 
       if (!res.ok) throw new Error(data.error || "Login failed");
 
@@ -60,12 +71,10 @@ export default function App() {
     setPage("profile");
   };
 
-  // IF PROFILE PAGE, LOAD Profile.jsx
   if (page === "profile") {
     return <Profile userName={userName} onLogout={() => setPage("login")} />;
   }
 
-  // LOGIN PAGE
   return (
     <div className="login-wrapper">
       <div className="brand-section">
