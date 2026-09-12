@@ -14,7 +14,6 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(cors({ origin: true, credentials: true }));
-app.options('*', cors());
 app.use(express.json());
 
 // --- SAFE DB CONNECTION ---
@@ -38,12 +37,12 @@ if (!dbUrl) {
   }
 }
 
-// --- API ROUTES FIRST ---
+// --- API ROUTES ---
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool' }));
 
 app.post('/api/register', async (req, res) => {
-  if (!pool) return res.status(500).json({ error: "DB not configured. Check MYSQL_URL in Railway" });
+  if (!pool) return res.status(500).json({ error: "DB not configured" });
   const { id, name, email, password } = req.body;
   try {
     await pool.execute("INSERT INTO users (id, name, email, password, status) VALUES (?,?,?,?,?)", [id, name, email, password, 'active']);
@@ -53,9 +52,7 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
   console.log("Login attempt:", req.body.email);
-  if (!pool) {
-    return res.status(500).json({ error: "DB not connected. Check Railway MYSQL_URL Variable" });
-  }
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { email, password } = req.body;
   try {
     const [rows] = await pool.execute("SELECT id, name, email FROM users WHERE email=? AND password=?", [email, password]);
@@ -69,18 +66,18 @@ app.post('/api/login', async (req, res) => {
 
 // --- FRONTEND LAST ---
 const frontendPath = path.join(__dirname, 'dist');
-console.log("__dirname:", __dirname, "dist exists:", fs.existsSync(frontendPath));
+console.log("dist exists:", fs.existsSync(frontendPath));
 
 if (fs.existsSync(frontendPath)) {
   app.use(express.static(frontendPath));
-  app.get(/.*/, (req, res) => {
+  app.get('*', (req, res) => {
     if (req.path.startsWith('/api')) {
       return res.status(404).json({ error: 'API route not found: ' + req.path });
     }
     res.sendFile(path.join(frontendPath, 'index.html'));
   });
 } else {
-  app.get('/', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running! - dist not found' }));
+  app.get('/', (req, res) => res.json({ status: 'ok', message: 'Backend Running - dist not found' }));
 }
 
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT}`));
