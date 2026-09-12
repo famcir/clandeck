@@ -13,18 +13,42 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.options('*', cors());
 app.use(express.json());
 
-const pool = mysql.createPool(process.env.MYSQL_URL || process.env.DATABASE_URL);
-console.log("Connecting...");
-pool.getConnection().then(c => { console.log("✅ DB Connected!"); c.release(); }).catch(err => console.error("❌ DB Failed:", err.message));
+// --- SAFE DB CONNECTION FOR PRIVATE NETWORK ---
+let pool;
+const dbUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
+
+if (!dbUrl) {
+  console.error("❌ MYSQL_URL missing!");
+} else {
+  console.log("Using DB URL:", dbUrl.includes("internal") ? "Internal Private" : "Public");
+  const isInternal = dbUrl.includes("railway.internal");
+  try {
+    pool = mysql.createPool(
+      isInternal 
+        ? dbUrl // Private = NO SSL
+        : { uri: dbUrl, ssl: { rejectUnauthorized: false } } // Public = SSL
+    );
+    pool.getConnection().then(c => {
+      console.log("✅ DB Connected!");
+      c.release();
+    }).catch(err => {
+      console.error("❌ DB Failed:", err.message, err.code);
+    });
+  } catch (err) {
+    console.error("Pool error:", err.message);
+  }
+}
 
 // --- API ROUTES FIRST ---
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool' }));
 
 app.post('/api/register', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not configured. Check MYSQL_URL in Railway" });
   const { id, name, email, password } = req.body;
   try {
     await pool.execute("INSERT INTO users (id, name, email, password, status) VALUES (?,?,?,?,?)", [id, name, email, password, 'active']);
@@ -33,29 +57,30 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
+  console.log("Login attempt:", req.body.email);
+  if (!pool) {
+    return res.status(500).json({ error: "DB not connected. Check Railway MYSQL_URL Variable" });
+  }
   const { email, password } = req.body;
   try {
     const [rows] = await pool.execute("SELECT id, name, email FROM users WHERE email=? AND password=?", [email, password]);
     if (rows.length === 0) return res.status(400).json({ error: "Wrong email or password" });
-    res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email, token: "token-" + rows[0].id });
+  } catch (err) {
+    console.error("Login DB Error:", err.message);
+    res.status(500).json({ error: "DB Error: " + err.message });
+  }
 });
 
-// --- DEBUG LOGS ---
-console.log("__dirname:", __dirname);
-const frontendPath = path.join(__dirname, 'dist');
-console.log("Checking:", frontendPath, "Exists:", fs.existsSync(frontendPath));
-if (fs.existsSync(frontendPath)) console.log("Files in dist:", fs.readdirSync(frontendPath));
-
 // --- FRONTEND LAST ---
+const frontendPath = path.join(__dirname, 'dist');
+console.log("__dirname:", __dirname, "dist exists:", fs.existsSync(frontendPath));
+
 if (fs.existsSync(frontendPath)) {
-  console.log(`✅ Serving frontend from ${frontendPath}`);
   app.use(express.static(frontendPath));
-  // This will NOT catch /api because /api routes are defined above
   app.get(/.*/, (req, res) => {
-    // Don't serve index.html for api routes that were not found
     if (req.path.startsWith('/api')) {
-      return res.status(404).json({ error: 'API route not found' });
+      return res.status(404).json({ error: 'API route not found: ' + req.path });
     }
     res.sendFile(path.join(frontendPath, 'index.html'));
   });
