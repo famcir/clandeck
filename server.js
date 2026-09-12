@@ -37,7 +37,7 @@ if (!dbUrl) {
   }
 }
 
-// --- API ROUTES ---
+// --- API ROUTES --- ALL API FIRST!
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool' }));
 
@@ -64,7 +64,26 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// --- FRONTEND LAST ---
+// GET my profiles - MOVED HERE!
+app.get('/api/profiles', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  const { owner_user_id } = req.query;
+  const [rows] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
+  res.json(rows);
+});
+
+// UPDATE profile - MOVED HERE!
+app.put('/api/profiles/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  const { display_name, relation_label, dob, photo_url, is_claimed } = req.body;
+  await pool.query(
+    'UPDATE profiles SET display_name=?, relation_label=?, dob=?, photo_url=?, is_claimed=? WHERE id=?',
+    [display_name, relation_label, dob, photo_url, is_claimed, req.params.id]
+  );
+  res.json({ success: true });
+});
+
+// --- FRONTEND LAST --- AFTER ALL API!
 const frontendPath = path.join(__dirname, 'dist');
 console.log("dist exists:", fs.existsSync(frontendPath));
 
