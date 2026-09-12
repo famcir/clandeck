@@ -24,14 +24,8 @@ export default function App() {
     }
     setLoading(true);
     try {
-      // FIXED: Works for both localhost and Railway
-      // If VITE_API_URL is /api or https://www.clandeck.com/api, we remove trailing /api
-      let rawUrl = (import.meta.env.VITE_API_URL || '').trim();
-      rawUrl = rawUrl.replace(/\/$/, ''); // remove trailing slash
-      const baseUrl = rawUrl.replace(/\/api$/, ''); // remove /api if user set it
-      // Now baseUrl is '' on Railway, or 'http://localhost:8080' locally
-
-      const res = await fetch(`${baseUrl}/api/login`, {
+      // FINAL FIX: Always use relative URL. Works on laptop, mobile, localhost, Railway.
+      const res = await fetch(`/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: username.trim(), password })
@@ -42,14 +36,13 @@ export default function App() {
       try {
         data = JSON.parse(text);
       } catch {
-        // FIXED: Show real error, not fake backend message
-        throw new Error(text || `Server returned: ${res.status} - Please try again`);
+        throw new Error(text || `Server error ${res.status}. Check Railway logs.`);
       }
 
-      if (!res.ok) throw new Error(data.error || "Login failed");
+      if (!res.ok) throw new Error(data.error || data.message || "Login failed");
 
-      const name = data.name || data.user?.name || data.fullName || data.displayName || username.split('@')[0];
-      const id = data.id || data.userId || data.email;
+      const name = data.name || data.user?.name || data.fullName || username.split('@')[0];
+      const id = data.id || data.userId || data.email || data.user?._id;
 
       setUserName(name);
       setUserId(id);
@@ -60,7 +53,13 @@ export default function App() {
       setShowPopup(true);
 
     } catch (err) {
-      setError(err.message);
+      console.error("Login Error:", err);
+      // Show real reason instead of generic "Failed to fetch"
+      if (err.message === "Failed to fetch") {
+        setError("Cannot reach server. Backend is down or MONGO_URI missing in Railway. Check /api");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
