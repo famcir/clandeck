@@ -17,21 +17,16 @@ app.use(cors({ origin: true, credentials: true }));
 app.options('*', cors());
 app.use(express.json());
 
-// --- SAFE DB CONNECTION FOR PRIVATE NETWORK ---
+// --- SAFE DB CONNECTION ---
 let pool;
 const dbUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
 
 if (!dbUrl) {
   console.error("❌ MYSQL_URL missing!");
 } else {
-  console.log("Using DB URL:", dbUrl.includes("internal") ? "Internal Private" : "Public");
-  const isInternal = dbUrl.includes("railway.internal");
+  console.log("Using DB URL:", dbUrl.includes("internal")? "Internal Private" : "Public");
   try {
-    pool = mysql.createPool(
-      isInternal 
-        ? dbUrl // Private = NO SSL
-        : { uri: dbUrl, ssl: { rejectUnauthorized: false } } // Public = SSL
-    );
+    pool = mysql.createPool(dbUrl);
     pool.getConnection().then(c => {
       console.log("✅ DB Connected!");
       c.release();
