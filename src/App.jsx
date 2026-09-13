@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import './App.css';
 import logo from './assets/clandeck-logo.png';
-import Profile from './Profile';
+import Profile from './Profile.jsx';
+import EditProfile from './editprofile.jsx';
 
 export default function App() {
   const [username, setUsername] = useState("");
@@ -71,8 +72,12 @@ export default function App() {
   };
 
   if (page === "profile") {
-    return <Profile userName={userName} onLogout={() => setPage("login")} />;
+    return <Profile userName={userName} onLogout={() => setPage("login")} onEdit={() => setPage("editprofile")} />;
   }
+  if (page === "editprofile") {
+    return <EditProfile onBack={() => setPage("profile")} />;
+  }
+
 
   return (
     <div className="login-wrapper">

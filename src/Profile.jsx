@@ -1,72 +1,111 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import logo from './assets/clandeck_h.png';
 
-export default function Profile() {
+export default function Profile({ onEdit, onLogout }) {
   const [profiles, setProfiles] = useState([]);
-  const [editing, setEditing] = useState(null);
-  const currentUserId = localStorage.getItem('userId') || 'ur001'; // your logged user
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  const currentUserId = localStorage.getItem('userId') || 'ur001';
 
   useEffect(() => {
     fetch(`/api/profiles?owner_user_id=${currentUserId}`)
-     .then(r => r.json())
-     .then(data => setProfiles(data));
-  }, []);
+    .then(res => res.json())
+    .then(data => setProfiles(data || []))
+    .catch(() => setProfiles([]));
+  }, [currentUserId]);
 
-  const saveProfile = async (p) => {
-    await fetch(`/api/profiles/${p.id}`, {
-      method: 'PUT',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        display_name: p.display_name,
-        relation_label: p.relation_label,
-        dob: p.dob || null,
-        photo_url: p.photo_url || null,
-        is_claimed: p.is_claimed? 1 : 0
-      })
-    });
-    setEditing(null);
+  const handleImageChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    setProfiles(prev => prev.map(p => p.id === self.id? {...p, photo_url: previewUrl} : p));
+    setUploading(true);
+    // later upload to backend here
+    setTimeout(() => setUploading(false), 800);
+  };
+
+  const get = (label) => profiles.find(p => p.relation_label === label);
+  const getAll = (label) => profiles.filter(p => p.relation_label === label);
+
+  const self = get('Self') || profiles[0];
+  if (!self) return <div className="p-10">Loading...</div>;
+
+  const father = get('Father');
+  const mother = get('Mother');
+  const spouse = get('Spouse');
+  const siblings = getAll('Sibling');
+  const children = getAll('Child');
+
+  const Node = ({ p, big }) => {
+    if (!p) return null;
+    return (
+      <div className="flex flex-col items-center cursor-pointer">
+        <div className={`${big? 'w-[70px] h-[70px] bg-[#c9ad83] text-white text-[24px]' : 'w-[62px] h-[62px] bg-[#f8f5f0] text-[22px]'} rounded-[16px] border flex items-center justify-center`}>
+          {p.photo_url? <img src={p.photo_url} className="w-full h-full rounded-[16px] object-cover" /> : p.display_name?.[0]}
+        </div>
+        <div className="mt-1 flex flex-col items-center text-center leading-none">
+          <p className="text-[11px] font-bold">{p.display_name}</p>
+          {big && <span className="text-[11px] font-bold">(you)</span>}
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white p-6 flex justify-center">
-      <div className="w-full max-w-4xl">
-        <h1 className="text-3xl font-bold mb-2">My Profiles</h1>
-        <p className="text-[#8a8a9a] mb-8">Manage your family profiles - {profiles.length} profiles</p>
+    <div className="min-h-screen w-full bg-[#f2efe8]" style={{ fontFamily: 'Plus Jakarta Sans' }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}`}</style>
 
-        <div className="grid gap-4">
-          {profiles.map((p) => (
-            <div key={p.id} className="bg-[#15151d] border border-[#252535] rounded-[20px] p-6 flex gap-5 items-center">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-xl font-bold overflow-hidden">
-                {p.photo_url? <img src={p.photo_url} className="w-full h-full object-cover" /> : p.display_name?.[0]}
-              </div>
+      <header className="h-[68px] bg-[#fffefb] border-b flex items-center px-6 justify-between">
+        <div className="flex items-center gap-2"><img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" /></div>
+        <div className="flex items-center gap-3">
+          <button onClick={onLogout} className="px-4 h-9 bg-black text-white rounded-full text-[12px]">Logout</button>
+          <img src={self.photo_url} className="w-9 h-9 rounded-full" alt="" />
+       </div>
+      </header>
 
-              <div className="flex-1">
-                {editing === p.id? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <input value={p.display_name} onChange={e=> setProfiles(profiles.map(x=> x.id===p.id? {...x, display_name:e.target.value}:x))} className="p-2.5 bg-[#1e1e2a] border border-[#2a2a3a] rounded-xl" placeholder="Display Name" />
-                    <input value={p.relation_label} onChange={e=> setProfiles(profiles.map(x=> x.id===p.id? {...x, relation_label:e.target.value}:x))} className="p-2.5 bg-[#1e1e2a] border border-[#2a2a3a] rounded-xl" placeholder="Relation: Self, Father, Mother..." />
-                    <input type="date" value={p.dob || ''} onChange={e=> setProfiles(profiles.map(x=> x.id===p.id? {...x, dob:e.target.value}:x))} className="p-2.5 bg-[#1e1e2a] border border-[#2a2a3a] rounded-xl" />
-                    <input value={p.photo_url || ''} onChange={e=> setProfiles(profiles.map(x=> x.id===p.id? {...x, photo_url:e.target.value}:x))} className="p-2.5 bg-[#1e1e2a] border border-[#2a2a3a] rounded-xl" placeholder="Photo URL" />
-                  </div>
-                ) : (
-                  <>
-                    <h3 className="font-bold text-lg">{p.display_name} <span className="text-xs px-2 py-1 bg-[#1e1e2a] rounded-full text-[#8a8a9a] ml-2">{p.relation_label}</span></h3>
-                    <p className="text-sm text-[#8a8a9a] mt-1">ID: {p.id} • Claimed: {p.is_claimed? 'Yes ✅' : 'No'} • DOB: {p.dob || 'Not set'}</p>
-                  </>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                {editing === p.id? (
-                  <>
-                    <button onClick={()=> saveProfile(p)} className="px-4 py-2 bg-violet-600 rounded-xl font-bold">Save</button>
-                    <button onClick={()=> setEditing(null)} className="px-4 py-2 bg-[#1e1e2a] rounded-xl">Cancel</button>
-                  </>
-                ) : (
-                  <button onClick={()=> setEditing(p.id)} className="px-4 py-2 bg-white text-black rounded-xl font-bold">Edit</button>
-                )}
+      <div className="grid grid-cols-12 gap-4 p-4 w-full">
+        <div className="col-span-12 lg:col-span-3 card p-6">
+          <div className="text-center">
+            <div className="relative w-[100px] h-[100px] mx-auto group cursor-pointer" onClick={() => fileInputRef.current.click()}>
+              <img src={self.photo_url} className="w-[100px] h-[100px] rounded-[20px] mx-auto object-cover" alt="" />
+              <div className="absolute inset-0 bg-black/50 rounded-[20px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                <span className="text-white text-[11px] font-bold">{uploading? '...' : 'Change'}</span>
               </div>
             </div>
-          ))}
+            <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
+            <h2 className="font-extrabold text-[18px] mt-3">{self.display_name}</h2>
+            <p className="text-[11px] text-gray-500">@{currentUserId} • {self.relation_label}</p>
+          </div>
+
+          <div className="mt-6 flex gap-2">
+            <button onClick={onEdit} className="flex-1 py-2.5 bg-black text-white rounded-full font-bold text-[12px]">Edit Profile</button>
+            <button className="flex-1 py-2.5 bg-[#827d74] text-white rounded-full font-bold text-[12px]">Share</button>
+          </div>
+
+          <div className="mt-5 space-y-2 text-[12px]">
+            <div className="flex justify-between"><span>Bio & Personal Details</span></div>
+            <div className="flex justify-between"><span>DOB</span><b>{self.dob? self.dob.split('T')[0] : '—'}</b></div>
+            <div className="flex justify-between"><span>Location</span><b>{self.location || '—'}</b></div>
+            <div className="flex justify-between"><span>Members</span><b>{profiles.length}</b></div>
+            {self.bio && <p className="bg-[#f8f5f0] p-3 rounded-xl mt-3">{self.bio}</p>}
+          </div>
+        </div>
+
+        <div className="col-span-12 lg:col-span-6 card p-6">
+          <div className="relative mx-auto" style={{ width: '520px', maxWidth: '100%', height: '420px' }}>
+            <div className="absolute" style={{ left: '125px', top: '0' }}><Node p={father} /></div>
+            <div className="absolute" style={{ left: '245px', top: '0' }}><Node p={mother} /></div>
+            <div className="absolute flex gap-2" style={{ left: '330px', top: '175px' }}>{siblings.map(s => <Node key={s.id} p={s} />)}</div>
+            <div className="absolute" style={{ left: '65px', top: '215px' }}><Node p={spouse} /></div>
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10"><Node p={self} big /></div>
+            <div className="absolute flex gap-3" style={{ left: '110px', top: '330px' }}>{children.map(c => <Node key={c.id} p={c} />)}</div>
+          </div>
+        </div>
+
+        <div className="col-span-12 lg:col-span-3 space-y-4">
+          <div className="card p-4"><h3 className="font-bold text-[13px]">Notifications</h3><p className="text-[12px] mt-2">✅ Profile loaded for {currentUserId}</p></div>
+          <div className="card p-4"><h3 className="font-bold text-[13px]">Pictures</h3><div className="grid grid-cols-3 gap-2 mt-2"><div className="aspect-square bg-[#f2efe8] rounded-xl"></div><div className="aspect-square bg-[#f2efe8] rounded-xl"></div><div className="aspect-square bg-[#f2efe8] rounded-xl"></div></div></div>
+          <div className="card p-4"><h3 className="font-bold text-[13px]">Baskets</h3><p className="text-[12px] mt-2">🧺 {profiles.length} members</p></div>
         </div>
       </div>
     </div>

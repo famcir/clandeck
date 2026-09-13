@@ -5,6 +5,9 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { S3Client } from '@aws-sdk/client-s3';
+import multer from 'multer';
+import multerS3 from 'multer-s3';
 
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
@@ -36,6 +39,28 @@ if (!dbUrl) {
     console.error("Pool error:", err.message);
   }
 }
+
+// --- RAILWAY BUCKET (TIGRIS T3) S3 CLIENT ---
+const s3 = new S3Client({
+  region: 'auto',
+  endpoint: process.env.ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.ACCESS_KEY_ID,
+    secretAccessKey: process.env.SECRET_ACCESS_KEY,
+  },
+});
+
+const upload = multer({
+  storage: multerS3({
+    s3: s3,
+    bucket: process.env.RAILWAY_BUCKET_NAME,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
+    acl: 'public-read',
+    key: (req, file, cb) => {
+      cb(null, `avatars/${Date.now()}-${file.originalname}`);
+    },
+  }),
+});
 
 // --- API ROUTES --- ALL API FIRST!
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
@@ -81,6 +106,13 @@ app.put('/api/profiles/:id', async (req, res) => {
     [display_name, relation_label, dob, photo_url, is_claimed, req.params.id]
   );
   res.json({ success: true });
+});
+
+// --- NEW: UPLOAD TO RAILWAY BUCKET ---
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  console.log("Uploaded to Railway Bucket:", req.file.location);
+  res.json({ success: true, url: req.file.location, key: req.file.key });
 });
 
 // --- FRONTEND LAST --- AFTER ALL API!
