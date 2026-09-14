@@ -41,6 +41,8 @@ if (!dbUrl) {
 }
 
 // --- RAILWAY BUCKET (TIGRIS T3) S3 CLIENT ---
+const BUCKET_NAME = process.env.RAILWAY_BUCKET_NAME || process.env.BUCKET_NAME || "clandeckbucket-kbeh97nv8b";
+
 const s3 = new S3Client({
   region: 'auto',
   endpoint: process.env.ENDPOINT,
@@ -53,17 +55,17 @@ const s3 = new S3Client({
 const upload = multer({
   storage: multerS3({
     s3: s3,
-    bucket: process.env.RAILWAY_BUCKET_NAME,
+    bucket: BUCKET_NAME,
     contentType: multerS3.AUTO_CONTENT_TYPE,
     key: (req, file, cb) => {
-      cb(null, `avatars/${Date.now()}-${file.originalname}`);
+      cb(null, `avatars/${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`);
     },
   }),
 });
 
-// --- API ROUTES --- ALL API FIRST!
+// --- API ROUTES ---
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool', bucket: BUCKET_NAME }));
 
 app.post('/api/register', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not configured" });
@@ -88,7 +90,48 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// GET my profiles - MOVED HERE!
+// --- USERS TABLE ROUTES (FOR YOUR PROFILE PAGE) ---
+// NEW 1: Get single user for Profile page
+app.get('/api/users/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const [rows] = await pool.execute("SELECT id, name, email, photo_url FROM users WHERE id=?", [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: "User not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// NEW 2: Update user photo from Profile page
+app.put('/api/users/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { photo_url, name, full_name } = req.body;
+    const displayName = full_name || name;
+
+    // Check if photo_url column exists, if not update name only
+    if (photo_url) {
+      // Try updating photo_url + name
+      try {
+        await pool.execute("UPDATE users SET photo_url=?, name=? WHERE id=?", [photo_url, displayName, req.params.id]);
+      } catch (e) {
+        // If photo_url column doesn't exist, fallback to name only (your table might be old)
+        console.log("photo_url column missing, updating name only:", e.message);
+        await pool.execute("UPDATE users SET name=? WHERE id=?", [displayName, req.params.id]);
+      }
+    } else if (displayName) {
+      await pool.execute("UPDATE users SET name=? WHERE id=?", [displayName, req.params.id]);
+    }
+
+    res.json({ success: true, photo_url });
+  } catch (err) {
+    console.error("User update error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- PROFILES TABLE ROUTES (Family members) ---
 app.get('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { owner_user_id } = req.query;
@@ -96,7 +139,12 @@ app.get('/api/profiles', async (req, res) => {
   res.json(rows);
 });
 
-// UPDATE profile - MOVED HERE!
+app.get('/api/profiles/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  const [rows] = await pool.query('SELECT * FROM profiles WHERE id =?', [req.params.id]);
+  res.json(rows[0] || {});
+});
+
 app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { display_name, relation_label, dob, photo_url, is_claimed } = req.body;
@@ -107,33 +155,30 @@ app.put('/api/profiles/:id', async (req, res) => {
   res.json({ success: true });
 });
 
-// --- NEW: UPLOAD TO RAILWAY BUCKET ---
-// UPLOAD - MUST RETURN PROXY URL, NOT DIRECT BUCKET URL
+// --- BUCKET UPLOAD ---
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  
+
   console.log("Uploaded to Railway Bucket key:", req.file.key);
-  
-  // IMPORTANT: Do NOT use req.file.location (that's the t3.storageapi.dev link - private)
-  // Use our proxy route
+
   const host = `${req.protocol}://${req.get('host')}`;
   const publicUrl = `${host}/api/files/${req.file.key}`;
-  
+
   console.log("Public URL (via proxy):", publicUrl);
   res.json({ success: true, url: publicUrl, key: req.file.key });
 });
 
-// FILE SERVING - This is what makes private file public
+// FILE SERVING - Makes private bucket public via backend
 app.get('/api/files/:key1/:key2', async (req, res) => {
   try {
     const key = `${req.params.key1}/${req.params.key2}`;
     console.log("Fetching file:", key);
-    
+
     const command = new GetObjectCommand({
-      Bucket: process.env.BUCKET_NAME || "clandeckbucket-kbeh97nv8b",
+      Bucket: BUCKET_NAME,
       Key: key,
     });
-    
+
     const data = await s3.send(command);
     res.setHeader('Content-Type', data.ContentType || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
@@ -144,9 +189,9 @@ app.get('/api/files/:key1/:key2', async (req, res) => {
   }
 });
 
-// --- FRONTEND LAST --- AFTER ALL API!
+// --- FRONTEND LAST ---
 const frontendPath = path.join(__dirname, 'dist');
-console.log("dist exists:", fs.existsSync(frontendPath));
+console.log("dist exists:", fs.existsSync(frontendPath), "Bucket:", BUCKET_NAME);
 
 if (fs.existsSync(frontendPath)) {
   app.use(express.static(frontendPath));
