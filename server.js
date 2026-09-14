@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { S3Client } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import multer from 'multer';
 import multerS3 from 'multer-s3';
 
@@ -55,7 +55,6 @@ const upload = multer({
     s3: s3,
     bucket: process.env.RAILWAY_BUCKET_NAME,
     contentType: multerS3.AUTO_CONTENT_TYPE,
-    acl: 'public-read',
     key: (req, file, cb) => {
       cb(null, `avatars/${Date.now()}-${file.originalname}`);
     },
@@ -109,10 +108,40 @@ app.put('/api/profiles/:id', async (req, res) => {
 });
 
 // --- NEW: UPLOAD TO RAILWAY BUCKET ---
+// UPLOAD - MUST RETURN PROXY URL, NOT DIRECT BUCKET URL
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  console.log("Uploaded to Railway Bucket:", req.file.location);
-  res.json({ success: true, url: req.file.location, key: req.file.key });
+  
+  console.log("Uploaded to Railway Bucket key:", req.file.key);
+  
+  // IMPORTANT: Do NOT use req.file.location (that's the t3.storageapi.dev link - private)
+  // Use our proxy route
+  const host = `${req.protocol}://${req.get('host')}`;
+  const publicUrl = `${host}/api/files/${req.file.key}`;
+  
+  console.log("Public URL (via proxy):", publicUrl);
+  res.json({ success: true, url: publicUrl, key: req.file.key });
+});
+
+// FILE SERVING - This is what makes private file public
+app.get('/api/files/:key1/:key2', async (req, res) => {
+  try {
+    const key = `${req.params.key1}/${req.params.key2}`;
+    console.log("Fetching file:", key);
+    
+    const command = new GetObjectCommand({
+      Bucket: process.env.BUCKET_NAME || "clandeckbucket-kbeh97nv8b",
+      Key: key,
+    });
+    
+    const data = await s3.send(command);
+    res.setHeader('Content-Type', data.ContentType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    data.Body.pipe(res);
+  } catch (err) {
+    console.error("File fetch error:", err);
+    res.status(404).json({ error: "File not found", details: err.message });
+  }
 });
 
 // --- FRONTEND LAST --- AFTER ALL API!
