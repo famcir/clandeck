@@ -41,7 +41,6 @@ const s3 = new S3Client({
   },
 });
 
-// USE MEMORY STORAGE - so we can control key exactly
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- API ROUTES ---
@@ -111,21 +110,31 @@ app.put('/api/profiles/:id', async (req, res) => {
   res.json({ success: true });
 });
 
-// --- FINAL FIX: FOLDER = userId, SAME NAME = OVERWRITE ---
+// --- FIXED: FOLDER = profileId ONLY - NO GENERAL FALLBACK ---
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   try {
-    const userId = req.query.userId || req.query.owner_user_id || 'general';
-    const profileId = req.query.profileId;
+    // Get profileId from anywhere
+    const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
+    const userId = req.query.userId || req.body?.userId || req.query.owner_user_id || req.body?.owner_user_id;
+
+    console.log("QUERY:", req.query, "BODY:", req.body);
+
+    if (!profileId) {
+      console.log("❌ profileId missing!");
+      return res.status(400).json({
+        error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID",
+        gotQuery: req.query,
+        gotBody: req.body
+      });
+    }
+
     const safeName = req.file.originalname.replace(/\s+/g, '-');
+    const key = `avatars/${profileId}/${safeName}`;
 
-    // THIS IS THE KEY - folder is userId
-    const key = `avatars/${userId}/${safeName}`;
+    console.log(`Uploading to: ${BUCKET_NAME}/${key} - overwrite if same name`);
 
-    console.log(`Uploading to bucket: ${BUCKET_NAME}/${key} - will overwrite if exists`);
-
-    // PutObject - S3 overwrites if same key exists
     await s3.send(new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
@@ -135,21 +144,19 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     const host = `${req.protocol}://${req.get('host')}`;
     const publicUrl = `${host}/api/files/${key}`;
-
     console.log("✅ Saved:", publicUrl);
 
-    // Auto update users table (login DB)
-    if (pool && userId!== 'general') {
+    if (pool) {
       try {
-        await pool.execute("UPDATE users SET photo_url=? WHERE id=?", [publicUrl, userId]);
-        console.log("✅ users table updated");
-        if (profileId) {
-          await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]).catch(()=>{});
+        await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]).catch(()=>{});
+        if (userId) {
+          await pool.execute("UPDATE users SET photo_url=? WHERE id=?", [publicUrl, userId]).catch(()=>{});
         }
-      } catch (e) { console.log("DB update error:", e.message); }
+        console.log("✅ DB updated for profile:", profileId);
+      } catch (e) { console.log("DB error:", e.message); }
     }
 
-    res.json({ success: true, url: publicUrl, key: key });
+    res.json({ success: true, url: publicUrl, key: key, folder: profileId });
 
   } catch (err) {
     console.error("Upload error:", err);
@@ -180,4 +187,4 @@ if (fs.existsSync(frontendPath)) {
   app.get('/', (req, res) => res.json({ status: 'ok', message: 'Backend Running - dist not found' }));
 }
 
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT} - Overwrite mode ON`));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT} - Folder=profileId ONLY`));

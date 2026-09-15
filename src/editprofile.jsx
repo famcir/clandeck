@@ -85,7 +85,7 @@ export default function EditProfile({ onBack }) {
           {uploading? 'Uploading to Bucket...' : 'Change Photo'}
           <input type="file" accept="image/*" onChange={handleImageChange} style={{display:'none'}} />
         </label>
-        {photoUrl && <p style={{fontSize:'11px', color:'green', marginTop:'8px', wordBreak:'break-all'}}>{photoUrl}</p>}
+        {photoUrl && <p style={{fontSize:'11px', color:'green', marginTop:'8px'}}>✅ Photo uploaded to Bucket!</p>}
       </div>
 
       <div style={{marginBottom:'15px'}}>
