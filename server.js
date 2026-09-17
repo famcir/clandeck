@@ -110,6 +110,49 @@ app.put('/api/profiles/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+// --- ADDED: Missing POST routes for AddFamilyModel ---
+app.post('/api/profiles', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { id, display_name, relation_label, bio, owner_user_id, photo_url, dob } = req.body;
+    await pool.execute(
+      "INSERT INTO profiles (id, display_name, relation_label, bio, owner_user_id, photo_url, dob) VALUES (?,?,?,?,?,?,?)",
+      [id, display_name, relation_label, bio || null, owner_user_id, photo_url || '', dob || null]
+    );
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error("POST /api/profiles error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/relations', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { owner_profile_id } = req.query;
+    if (!owner_profile_id) return res.json([]);
+    const [rows] = await pool.query('SELECT * FROM profile_relations WHERE owner_profile_id =?', [owner_profile_id]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/relations', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { owner_profile_id, related_profile_id, relation_type, spouse_group } = req.body;
+    await pool.execute(
+      "INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?)",
+      [owner_profile_id, related_profile_id, relation_type, spouse_group || null]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("POST /api/relations error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- FIXED: FOLDER = profileId ONLY - NO GENERAL FALLBACK ---
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
