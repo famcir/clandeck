@@ -92,34 +92,47 @@ app.put('/api/users/:id', async (req, res) => {
 
 app.get('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
-  const { owner_user_id } = req.query;
-  const [rows] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
-  res.json(rows);
+  try {
+    const { owner_user_id } = req.query;
+    if (!owner_user_id) return res.json([]);
+    const [rows] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
+    res.json(rows);
+  } catch(e){ res.status(500).json({error: e.message}) }
 });
 
 app.get('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
-  const [rows] = await pool.query('SELECT * FROM profiles WHERE id =?', [req.params.id]);
-  res.json(rows[0] || {});
+  try {
+    const [rows] = await pool.query('SELECT * FROM profiles WHERE id =?', [req.params.id]);
+    res.json(rows[0] || {});
+  } catch(e){ res.status(500).json({error: e.message}) }
 });
 
 app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
-  const { display_name, relation_label, dob, photo_url, is_claimed } = req.body;
-  await pool.query('UPDATE profiles SET display_name=?, relation_label=?, dob=?, photo_url=?, is_claimed=? WHERE id=?', [display_name, relation_label, dob, photo_url, is_claimed, req.params.id]);
-  res.json({ success: true });
+  try {
+    const { display_name, relation_label, dob, photo_url, is_claimed } = req.body;
+    await pool.query('UPDATE profiles SET display_name=?, relation_label=?, dob=?, photo_url=?, is_claimed=? WHERE id=?', [display_name, relation_label, dob, photo_url, is_claimed, req.params.id]);
+    res.json({ success: true });
+  } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- ADDED: Missing POST routes for AddFamilyModel ---
+// --- FIXED: MATCHES YOUR REAL TABLE (NO bio column) ---
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const { id, display_name, relation_label, bio, owner_user_id, photo_url, dob } = req.body;
+    const { id, display_name, relation_label, owner_user_id, photo_url, dob, name } = req.body;
+    const finalName = display_name || name;
+    const finalId = id || `pr_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+
+    if (!finalName) return res.status(400).json({ error: "display_name required" });
+    if (!owner_user_id) return res.status(400).json({ error: "owner_user_id required" });
+
     await pool.execute(
-      "INSERT INTO profiles (id, display_name, relation_label, bio, owner_user_id, photo_url, dob) VALUES (?,?,?,?,?,?,?)",
-      [id, display_name, relation_label, bio || null, owner_user_id, photo_url || '', dob || null]
+      "INSERT INTO profiles (id, owner_user_id, display_name, relation_label, dob, photo_url, is_claimed, created_by_user_id) VALUES (?,?,?,?,?,?,?,?)",
+      [finalId, owner_user_id, finalName, relation_label || 'Family', dob || null, photo_url || null, 0, owner_user_id]
     );
-    res.json({ success: true, id });
+    res.json({ success: true, id: finalId });
   } catch (err) {
     console.error("POST /api/profiles error:", err.message);
     res.status(500).json({ error: err.message });
@@ -138,71 +151,55 @@ app.get('/api/relations', async (req, res) => {
   }
 });
 
+// --- FIXED: NOW WITH id COLUMN ---
 app.post('/api/relations', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const { owner_profile_id, related_profile_id, relation_type, spouse_group } = req.body;
+    const { id, owner_profile_id, related_profile_id, relation_type, spouse_group } = req.body;
+    const finalId = id || `rel_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+
+    if (!owner_profile_id ||!related_profile_id ||!relation_type) {
+      return res.status(400).json({ error: "owner_profile_id, related_profile_id, relation_type required" });
+    }
+
     await pool.execute(
-      "INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?)",
-      [owner_profile_id, related_profile_id, relation_type, spouse_group || null]
+      "INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?)",
+      [finalId, owner_profile_id, related_profile_id, relation_type, spouse_group || null]
     );
-    res.json({ success: true });
+    res.json({ success: true, id: finalId });
   } catch (err) {
     console.error("POST /api/relations error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- FIXED: FOLDER = profileId ONLY - NO GENERAL FALLBACK ---
+// --- FIXED: FOLDER = profileId ONLY ---
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
   try {
-    // Get profileId from anywhere
     const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
     const userId = req.query.userId || req.body?.userId || req.query.owner_user_id || req.body?.owner_user_id;
-
-    console.log("QUERY:", req.query, "BODY:", req.body);
-
     if (!profileId) {
-      console.log("❌ profileId missing!");
-      return res.status(400).json({
-        error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID",
-        gotQuery: req.query,
-        gotBody: req.body
-      });
+      return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
     }
-
     const safeName = req.file.originalname.replace(/\s+/g, '-');
     const key = `avatars/${profileId}/${safeName}`;
-
-    console.log(`Uploading to: ${BUCKET_NAME}/${key} - overwrite if same name`);
-
     await s3.send(new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
       Body: req.file.buffer,
       ContentType: req.file.mimetype || 'image/jpeg',
     }));
-
     const host = `${req.protocol}://${req.get('host')}`;
     const publicUrl = `${host}/api/files/${key}`;
-    console.log("✅ Saved:", publicUrl);
-
     if (pool) {
       try {
         await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]).catch(()=>{});
-        if (userId) {
-          await pool.execute("UPDATE users SET photo_url=? WHERE id=?", [publicUrl, userId]).catch(()=>{});
-        }
-        console.log("✅ DB updated for profile:", profileId);
-      } catch (e) { console.log("DB error:", e.message); }
+        if (userId) await pool.execute("UPDATE users SET photo_url=? WHERE id=?", [publicUrl, userId]).catch(()=>{});
+      } catch (e) {}
     }
-
     res.json({ success: true, url: publicUrl, key: key, folder: profileId });
-
   } catch (err) {
-    console.error("Upload error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -230,4 +227,4 @@ if (fs.existsSync(frontendPath)) {
   app.get('/', (req, res) => res.json({ status: 'ok', message: 'Backend Running - dist not found' }));
 }
 
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT} - Folder=profileId ONLY`));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT}`));

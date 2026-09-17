@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 
-export default function AddFamilyModal({ selfId, currentUserId, onClose, onAdded }) {
+const API_BASE = 'http://localhost:3000';
+
+export default function AddFamilyModel({ selfId, currentUserId, onClose, onAdded }) {
   const [relation, setRelation] = useState('Father');
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
@@ -22,7 +24,7 @@ export default function AddFamilyModal({ selfId, currentUserId, onClose, onAdded
     try {
       // 1. Create profile in profiles table
       const newId = 'pr' + Date.now();
-      const res1 = await fetch('/api/profiles', {
+      const res1 = await fetch(`${API_BASE}/api/profiles`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -43,14 +45,14 @@ export default function AddFamilyModal({ selfId, currentUserId, onClose, onAdded
       if(photo){
         const fd = new FormData();
         fd.append('file', photo);
-        const upRes = await fetch(`/api/upload?profileId=${profileId}&userId=${currentUserId}`, {
+        const upRes = await fetch(`${API_BASE}/api/upload?profileId=${profileId}&userId=${currentUserId}`, {
           method: 'POST',
           body: fd
         });
         const upData = await upRes.json();
         photoUrl = upData.url || '';
         // update profile with photo
-        await fetch(`/api/profiles/${profileId}`, {
+        await fetch(`${API_BASE}/api/profiles/${profileId}`, {
           method: 'PUT',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ display_name: name, relation_label: relation === 'wife'? 'Spouse' : relation, photo_url: photoUrl, bio })
@@ -58,7 +60,7 @@ export default function AddFamilyModal({ selfId, currentUserId, onClose, onAdded
       }
 
       // 3. Create link in profile_relations
-      await fetch('/api/relations', {
+      await fetch(`${API_BASE}/api/relations`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
