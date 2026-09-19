@@ -56,6 +56,31 @@ app.post('/api/register', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// --- NEW: SHARE TEMP USER - UN + firstName / pw1234 ---
+app.post('/api/share-temp-user', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  const { id, name, email, password, profile_id, invited_by_user_id } = req.body;
+  try {
+    try { await pool.query("ALTER TABLE users ADD COLUMN invited_by_user_id VARCHAR(255)"); } catch(e) {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN shared_profile_id VARCHAR(255)"); } catch(e) {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN is_temp TINYINT DEFAULT 0"); } catch(e) {}
+
+    await pool.execute(
+      "INSERT INTO users (id, name, email, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?)",
+      [id, name, email, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]
+    );
+    res.json({ success: true, username: email, password: password || 'pw1234' });
+  } catch (err) {
+    if (err.message.includes('Duplicate')) {
+      try {
+        await pool.execute("UPDATE users SET password=?, invited_by_user_id=?, shared_profile_id=? WHERE email=?", [password || 'pw1234', invited_by_user_id, profile_id || null, email]);
+        return res.json({ success: true, username: email, password: password || 'pw1234', reused: true });
+      } catch(e2) { return res.status(500).json({ error: e2.message }); }
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/login', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { email, password } = req.body;
@@ -117,7 +142,6 @@ app.put('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- NEW: DELETE ROUTE ---
 app.delete('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -177,7 +201,6 @@ app.post('/api/relations', async (req, res) => {
   }
 });
 
-// --- FIXED: ONLY updates profiles table, NEVER users table ---
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
