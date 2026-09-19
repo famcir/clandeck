@@ -3,6 +3,7 @@ import './App.css';
 import logo from './assets/clandeck-logo.png';
 import Profile from './Profile.jsx';
 import EditProfile from './editprofile.jsx';
+import Deck from './Deck.jsx';
 
 export default function App() {
   const [username, setUsername] = useState("");
@@ -25,7 +26,6 @@ export default function App() {
     }
     setLoading(true);
     try {
-      // FINAL FIX: Always use relative URL. Works on laptop, mobile, localhost, Railway.
       const res = await fetch(`/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -55,7 +55,6 @@ export default function App() {
 
     } catch (err) {
       console.error("Login Error:", err);
-      // Show real reason instead of generic "Failed to fetch"
       if (err.message === "Failed to fetch") {
         setError("Cannot reach server. Backend is down or MONGO_URI missing in Railway. Check /api");
       } else {
@@ -68,16 +67,19 @@ export default function App() {
 
   const handlePopupOk = () => {
     setShowPopup(false);
-    setPage("profile");
+    setPage("deck");
   };
 
+  if (page === "deck") {
+    return <Deck onGoProfile={() => setPage("profile")} onLogout={() => setPage("login")} />;
+  }
+
   if (page === "profile") {
-    return <Profile userName={userName} onLogout={() => setPage("login")} onEdit={() => setPage("editprofile")} />;
+    return <Profile userName={userName} onLogout={() => setPage("login")} onEdit={() => setPage("editprofile")} onBack={() => setPage("deck")} />;
   }
   if (page === "editprofile") {
     return <EditProfile onBack={() => setPage("profile")} />;
   }
-
 
   return (
     <div className="login-wrapper">

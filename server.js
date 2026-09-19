@@ -117,17 +117,24 @@ app.put('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- FIXED: MATCHES YOUR REAL TABLE (NO bio column) ---
+// --- NEW: DELETE ROUTE ---
+app.delete('/api/profiles/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    await pool.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [req.params.id, req.params.id]);
+    await pool.query('DELETE FROM profiles WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch(e){ res.status(500).json({error: e.message}) }
+});
+
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
     const { id, display_name, relation_label, owner_user_id, photo_url, dob, name } = req.body;
     const finalName = display_name || name;
     const finalId = id || `pr_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
-
     if (!finalName) return res.status(400).json({ error: "display_name required" });
     if (!owner_user_id) return res.status(400).json({ error: "owner_user_id required" });
-
     await pool.execute(
       "INSERT INTO profiles (id, owner_user_id, display_name, relation_label, dob, photo_url, is_claimed, created_by_user_id) VALUES (?,?,?,?,?,?,?,?)",
       [finalId, owner_user_id, finalName, relation_label || 'Family', dob || null, photo_url || null, 0, owner_user_id]
@@ -151,17 +158,14 @@ app.get('/api/relations', async (req, res) => {
   }
 });
 
-// --- FIXED: NOW WITH id COLUMN ---
 app.post('/api/relations', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
     const { id, owner_profile_id, related_profile_id, relation_type, spouse_group } = req.body;
     const finalId = id || `rel_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
-
     if (!owner_profile_id ||!related_profile_id ||!relation_type) {
       return res.status(400).json({ error: "owner_profile_id, related_profile_id, relation_type required" });
     }
-
     await pool.execute(
       "INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?)",
       [finalId, owner_profile_id, related_profile_id, relation_type, spouse_group || null]
@@ -173,12 +177,11 @@ app.post('/api/relations', async (req, res) => {
   }
 });
 
-// --- FIXED: FOLDER = profileId ONLY ---
+// --- FIXED: ONLY updates profiles table, NEVER users table ---
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
     const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
-    const userId = req.query.userId || req.body?.userId || req.query.owner_user_id || req.body?.owner_user_id;
     if (!profileId) {
       return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
     }
@@ -193,10 +196,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const host = `${req.protocol}://${req.get('host')}`;
     const publicUrl = `${host}/api/files/${key}`;
     if (pool) {
-      try {
-        await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]).catch(()=>{});
-        if (userId) await pool.execute("UPDATE users SET photo_url=? WHERE id=?", [publicUrl, userId]).catch(()=>{});
-      } catch (e) {}
+      await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]);
     }
     res.json({ success: true, url: publicUrl, key: key, folder: profileId });
   } catch (err) {
