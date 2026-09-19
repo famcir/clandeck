@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import logo from './assets/clandeck_h.png';
 
-export default function Profile({ onEdit, onLogout }) {
+export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const [profiles, setProfiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -77,14 +77,11 @@ export default function Profile({ onEdit, onLogout }) {
 
   const handleAddFamily = async () => {
     if(!newName) return alert('Enter name');
-
-    // --- DUPLICATE CHECK ---
     const checkLabel = newRelation.toLowerCase() === 'wife'? 'spouse' : newRelation.toLowerCase();
     const alreadyExists = profiles.find(p => p.relation_label?.toLowerCase() === checkLabel);
     if (['father','mother','spouse'].includes(checkLabel) && alreadyExists) {
       return alert(`${alreadyExists.relation_label} already saved as ${alreadyExists.display_name}!`);
     }
-
     setAdding(true);
     try {
       const newId = 'pr' + Date.now();
@@ -140,7 +137,6 @@ export default function Profile({ onEdit, onLogout }) {
     } finally { setAdding(false); }
   };
 
-  // --- NEW: EDIT / DELETE ---
   const handleDelete = async (profileId) => {
     if(!confirm('Delete this member?')) return;
     await fetch(`/api/profiles/${profileId}`, { method: 'DELETE' });
@@ -156,6 +152,11 @@ export default function Profile({ onEdit, onLogout }) {
       body: JSON.stringify({ display_name: newNameEdit.trim(), relation_label: p.relation_label, dob: p.dob, photo_url: p.photo_url, is_claimed: p.is_claimed })
     });
     setProfiles(prev => prev.map(x => x.id === p.id? {...x, display_name: newNameEdit.trim()} : x));
+  };
+
+  const goDeck = () => {
+    if (onDeck) onDeck();
+    else if (onBack) onBack();
   };
 
   if (!self) return <div className="p-10">Loading {currentUserId}...</div>;
@@ -192,7 +193,10 @@ export default function Profile({ onEdit, onLogout }) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}`}</style>
 
       <header className="h-[68px] bg-[#fffefb] border-b flex items-center px-6 justify-between">
-        <div className="flex items-center gap-2"><img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" /></div>
+        <div className="flex items-center gap-3">
+          <img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />
+          <button onClick={goDeck} className="ml-2 px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Deck</button>
+        </div>
         <div className="flex items-center gap-3">
           <button onClick={onLogout} className="px-4 h-9 bg-black text-white rounded-full text-[12px]">Logout</button>
           <img src={self.photo_url} className="w-9 h-9 rounded-full object-cover" alt="" />
@@ -228,12 +232,7 @@ export default function Profile({ onEdit, onLogout }) {
 
           <div className="col-span-12 lg:col-span-6 card p-6">
           <div className="flex justify-between items-center mb-4">
-            <button
-              onClick={() => setShowAddmodel(true)}
-              className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold"
-            >
-              + Add Family Member
-            </button>
+            <button onClick={() => setShowAddmodel(true)} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">+ Add Family Member</button>
             <span className="text-[11px] text-gray-500">{profiles.length} members</span>
           </div>
           <div className="relative mx-auto" style={{ width: '520px', maxWidth: '100%', height: '420px' }}>
