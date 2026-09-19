@@ -10,12 +10,13 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [selected, setSelected] = useState(null);
   const [shareLink, setShareLink] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [viewProfile, setViewProfile] = useState(null); // FIX: KEEP CLICKED PROFILE
 
   // 1. Fetch logged-in user for LEFT PANEL - once
   useEffect(() => {
     fetch(`/api/profiles?owner_user_id=${currentUserId}`)
-    .then(r => r.json())
-    .then(data => {
+   .then(r => r.json())
+   .then(data => {
         const me = data?.find(p => p.id === currentUserId) || data?.find(p => p.relation_label?.toLowerCase() === 'self') || data?.[0];
         setLoggedProfile(me);
         if (viewUserId === currentUserId) {
@@ -29,16 +30,17 @@ export default function Deck({ onGoProfile, onLogout }) {
   useEffect(() => {
     if (viewUserId === currentUserId) return; // already loaded
     fetch(`/api/profiles?owner_user_id=${viewUserId}`)
-    .then(r => r.json())
-    .then(data => {
-        // If selected user has no family yet, show at least selected as root
+   .then(r => r.json())
+   .then(data => {
+        // If selected user has no family yet, show at least selected as root - EVEN SINGLE MEMBER
         if (!data || data.length === 0) {
-          setTreeProfiles(selected? [selected] : []);
-          setTreeSelf(selected || null);
+          const fallback = viewProfile || selected;
+          setTreeProfiles(fallback? [fallback] : []);
+          setTreeSelf(fallback || null);
         } else {
           setTreeProfiles(data);
           const me = data?.find(p => p.id === viewUserId) || data[0];
-          setTreeSelf(me || selected || null);
+          setTreeSelf(me || viewProfile || selected || null);
         }
       });
   }, [viewUserId]);
@@ -67,6 +69,7 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   const handleViewTree = () => {
     if(!selected) return;
+    setViewProfile(selected); // FIX: SAVE BEFORE CLEAR
     setViewUserId(selected.id);
     setSelected(null);
   };
@@ -94,6 +97,12 @@ export default function Deck({ onGoProfile, onLogout }) {
     setSharing(false);
   };
 
+  const handleBackToMyTree = () => {
+    setViewProfile(null);
+    setViewUserId(currentUserId);
+    fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(d=>{ setTreeProfiles(d||[]); const me = d?.find(p=>p.id===currentUserId)||d?.[0]; setTreeSelf(me); });
+  };
+
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{ fontFamily: 'Plus Jakarta Sans' }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}`}</style>
@@ -101,7 +110,7 @@ export default function Deck({ onGoProfile, onLogout }) {
       <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-6 justify-between sticky top-0 z-20 w-full">
         <img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />
         <div className="flex items-center gap-3">
-          {viewUserId!== currentUserId && <button onClick={() => { setViewUserId(currentUserId); setTreeProfiles([]); fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(d=>{ setTreeProfiles(d||[]); const me = d?.find(p=>p.id===currentUserId)||d?.[0]; setTreeSelf(me); }); }} className="px-4 h-9 bg-[#f8f5f0] border rounded-full text-[12px] font-bold">Back to My Tree</button>}
+          {viewUserId!== currentUserId && <button onClick={handleBackToMyTree} className="px-4 h-9 bg-[#f8f5f0] border rounded-full text-[12px] font-bold">Back to My Tree</button>}
           <button onClick={onLogout} className="px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Logout</button>
           <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" alt="profile" />
         </div>
@@ -132,17 +141,30 @@ export default function Deck({ onGoProfile, onLogout }) {
         {/* CENTER - DYNAMIC TREE */}
         <div className="col-span-12 lg:col-span-6 card p-6 w-full">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="font-extrabold text-[18px]">{viewUserId === currentUserId? 'My Family Tree' : `${treeSelf?.display_name || 'Member'}'s Tree`}</h2>
+            <h2 className="font-extrabold text-[18px]">{viewUserId === currentUserId? 'My Family Tree' : `${treeSelf?.display_name || viewProfile?.display_name || 'Member'}'s Tree`}</h2>
             <span className="text-[11px] bg-[#f2efe8] px-3 py-1 rounded-full font-bold">{treeProfiles.length} Members</span>
           </div>
-          <div className="relative mx-auto w-full" style={{ height: '440px' }}>
-            <div className="absolute" style={{ left: '130px', top: '0' }}><Node p={father} /></div>
-            <div className="absolute" style={{ left: '250px', top: '0' }}><Node p={mother} /></div>
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10"><Node p={treeSelf} big /></div>
-            <div className="absolute flex gap-2" style={{ left: '340px', top: '40px' }}>{siblings.map(s => <Node key={s.id} p={s} />)}</div>
-            <div className="absolute" style={{ left: '60px', top: '180px' }}><Node p={spouse} /></div>
-            <div className="absolute flex gap-3" style={{ left: '110px', top: '310px' }}>{children.map(c => <Node key={c.id} p={c} />)}</div>
-          </div>
+          {/* FIX: SHOW EVEN IF 1 MEMBER */}
+          {treeProfiles.length <= 1 && treeSelf? (
+            <div className="h-[440px] flex flex-col items-center justify-center">
+              <div onClick={() => setSelected(treeSelf)} className="flex flex-col items-center cursor-pointer">
+                <div className="w-[90px] h-[90px] bg-[#c9ad83] text-white text-[28px] rounded-[22px] flex items-center justify-center overflow-hidden border shadow-sm">
+                  {treeSelf.photo_url? <img src={treeSelf.photo_url} className="w-full h-full object-cover" /> : treeSelf.display_name?.[0]}
+                </div>
+                <p className="font-extrabold mt-3 text-[16px]">{treeSelf.display_name}</p>
+                <p className="text-[11px] text-gray-500">{treeSelf.relation_label} {treeProfiles.length===1? '• Only member' : ''}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="relative mx-auto w-full" style={{ height: '440px' }}>
+              <div className="absolute" style={{ left: '130px', top: '0' }}><Node p={father} /></div>
+              <div className="absolute" style={{ left: '250px', top: '0' }}><Node p={mother} /></div>
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10"><Node p={treeSelf} big /></div>
+              <div className="absolute flex gap-2" style={{ left: '340px', top: '40px' }}>{siblings.map(s => <Node key={s.id} p={s} />)}</div>
+              <div className="absolute" style={{ left: '60px', top: '180px' }}><Node p={spouse} /></div>
+              <div className="absolute flex gap-3" style={{ left: '110px', top: '310px' }}>{children.map(c => <Node key={c.id} p={c} />)}</div>
+            </div>
+          )}
         </div>
 
         <div className="col-span-12 lg:col-span-3 space-y-4">
