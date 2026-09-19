@@ -111,8 +111,8 @@ app.get('/api/profiles/:id', async (req, res) => {
 app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const { display_name, relation_label, dob, photo_url, is_claimed } = req.body;
-    await pool.query('UPDATE profiles SET display_name=?, relation_label=?, dob=?, photo_url=?, is_claimed=? WHERE id=?', [display_name, relation_label, dob, photo_url, is_claimed, req.params.id]);
+    const { display_name, relation_label, dob, photo_url, is_claimed, bio, location } = req.body;
+    await pool.query('UPDATE profiles SET display_name=?, relation_label=?, dob=?, photo_url=?, is_claimed=?, bio=?, location=? WHERE id=?', [display_name, relation_label, dob, photo_url, is_claimed, bio, location, req.params.id]);
     res.json({ success: true });
   } catch(e){ res.status(500).json({error: e.message}) }
 });
@@ -130,14 +130,14 @@ app.delete('/api/profiles/:id', async (req, res) => {
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const { id, display_name, relation_label, owner_user_id, photo_url, dob, name } = req.body;
+    const { id, display_name, relation_label, owner_user_id, photo_url, dob, name, bio, location } = req.body;
     const finalName = display_name || name;
     const finalId = id || `pr_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
     if (!finalName) return res.status(400).json({ error: "display_name required" });
     if (!owner_user_id) return res.status(400).json({ error: "owner_user_id required" });
     await pool.execute(
-      "INSERT INTO profiles (id, owner_user_id, display_name, relation_label, dob, photo_url, is_claimed, created_by_user_id) VALUES (?,?,?,?,?,?,?,?)",
-      [finalId, owner_user_id, finalName, relation_label || 'Family', dob || null, photo_url || null, 0, owner_user_id]
+      "INSERT INTO profiles (id, owner_user_id, display_name, relation_label, dob, photo_url, is_claimed, created_by_user_id, bio, location) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      [finalId, owner_user_id, finalName, relation_label || 'Family', dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null]
     );
     res.json({ success: true, id: finalId });
   } catch (err) {
