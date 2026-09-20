@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import multer from 'multer';
 
 dotenv.config();
@@ -133,6 +133,48 @@ app.get('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
+// --- NEW: FAMILY TREE FOR ANY PROFILE (AUTO-LINK PARENTS/SPOUSE/CHILDREN/SIBLINGS) ---
+app.get('/api/family-tree/:profileId', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { profileId } = req.params;
+    const [selfRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [profileId]);
+    const self = selfRows[0];
+    if (!self) return res.json([]);
+
+    const ownerId = self.owner_user_id;
+    const [familyRows] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [ownerId]);
+    let family = familyRows;
+
+    if (!family.find(p => p.id === profileId)) family.push(self);
+
+    const selfLabel = (self.relation_label || '').toLowerCase();
+
+    const result = family.map(p => {
+      if (p.id === profileId) return {...p, relation_label: 'Self' };
+      const label = (p.relation_label || '').toLowerCase();
+
+      if (selfLabel === 'father' && label === 'mother') return {...p, relation_label: 'Spouse' };
+      if (selfLabel === 'mother' && label === 'father') return {...p, relation_label: 'Spouse' };
+
+      if (['father','mother'].includes(selfLabel)) {
+        if (['self','sibling','child'].includes(label)) return {...p, relation_label: 'Child' };
+      }
+
+      if (['self','sibling','child'].includes(selfLabel)) {
+        if (['self','sibling','child'].includes(label)) return {...p, relation_label: 'Sibling' };
+      }
+
+      return p;
+    });
+
+    res.json(result);
+  } catch (e) {
+    console.error('family-tree error', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -145,8 +187,44 @@ app.put('/api/profiles/:id', async (req, res) => {
 app.delete('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    await pool.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [req.params.id, req.params.id]);
-    await pool.query('DELETE FROM profiles WHERE id=?', [req.params.id]);
+    const profileId = req.params.id;
+    console.log(`🗑️ Deleting profile ${profileId}`);
+
+    // --- FIXED: DELETE S3 FOLDER avatars/profileId/ ---
+    try {
+      let continuationToken = undefined;
+      let isTruncated = true;
+      while (isTruncated) {
+        const list = await s3.send(new ListObjectsV2Command({
+          Bucket: BUCKET_NAME,
+          Prefix: `avatars/${profileId}`,
+          ContinuationToken: continuationToken
+        }));
+        if (list.Contents && list.Contents.length > 0) {
+          for (const obj of list.Contents) {
+            console.log(` → Deleting S3: ${obj.Key}`);
+            await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: obj.Key }));
+          }
+        }
+        isTruncated = list.IsTruncated || false;
+        continuationToken = list.NextContinuationToken;
+        if (!isTruncated) break;
+      }
+      // Also delete exact key from photo_url if stored differently
+      const [prows] = await pool.query('SELECT photo_url FROM profiles WHERE id=?', [profileId]);
+      const pUrl = prows[0]?.photo_url || '';
+      if (pUrl.includes('/api/files/')) {
+        const k = decodeURIComponent(pUrl.split('/api/files/')[1]);
+        if (k) {
+          console.log(` → Deleting S3 url key: ${k}`);
+          await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: k })).catch(()=>{});
+        }
+      }
+    } catch(s3e){ console.log('S3 delete skip:', s3e.message); }
+
+    // --- DELETE DB ---
+    await pool.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
+    await pool.query('DELETE FROM profiles WHERE id=?', [profileId]);
     res.json({ success: true });
   } catch(e){ res.status(500).json({error: e.message}) }
 });
