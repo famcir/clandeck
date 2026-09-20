@@ -287,6 +287,14 @@ app.post('/api/profiles', async (req, res) => {
           `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`,
           [rel1, myId, finalId, 'Spouse', groupId, rel2, finalId, myId, 'Spouse', groupId]
         );
+        // FIX: If child was added BEFORE spouse, update child's other parent now
+        try {
+          if (me.gender === 'Female') {
+            await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='')`, [finalId, myId]);
+          } else {
+            await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='')`, [finalId, myId]);
+          }
+        } catch(e) { console.log('spouse->child update skip', e.message); }
       } else if (finalRelation === 'Sibling') {
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
         const rel2 = `rel_${Date.now()+1}_${Math.random().toString(36).substr(2,3)}`;
