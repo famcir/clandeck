@@ -141,9 +141,7 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const self = selfRows[0];
     if (!self) return res.json([]);
 
-    // get all profiles of same owner (family)
     const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [self.owner_user_id]);
-    // get spouse relations
     const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id=? AND relation_type='Spouse'`, [profileId]);
 
     const spouseIds = spouseRelations.map(r => r.related_profile_id);
@@ -154,21 +152,16 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
 
     const result = [];
-
     result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
-
     if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
     if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
     spouses.forEach(s => result.push({...s, relation_label: 'Spouse', computed_relation: 'Spouse'}));
     siblings.forEach(s => result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}));
     children.forEach(c => result.push({...c, relation_label: 'Child', computed_relation: 'Child'}));
-
-    // add remaining family as Extended (to keep backward compat)
     const addedIds = new Set(result.map(r => r.id));
     allProfiles.forEach(p => {
       if (!addedIds.has(p.id)) result.push({...p, relation_label: p.relation_label || 'Family', computed_relation: 'Family'});
     });
-
     res.json(result);
   } catch (e) {
     console.error('family-tree error', e.message);
@@ -180,7 +173,6 @@ app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
     const { display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id } = req.body;
-    // allow updating new columns too
     await pool.query(
       `UPDATE profiles SET display_name=COALESCE(?,display_name), dob=COALESCE(?,dob), photo_url=COALESCE(?,photo_url), is_claimed=COALESCE(?,is_claimed), bio=COALESCE(?,bio), location=COALESCE(?,location), gender=COALESCE(?,gender), father_id=COALESCE(?,father_id), mother_id=COALESCE(?,mother_id) WHERE id=?`,
       [display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, req.params.id]
@@ -194,7 +186,6 @@ app.delete('/api/profiles/:id', async (req, res) => {
   try {
     const profileId = req.params.id;
     console.log(`🗑️ Deleting profile ${profileId}`);
-
     try {
       let continuationToken = undefined;
       let isTruncated = true;
@@ -222,11 +213,8 @@ app.delete('/api/profiles/:id', async (req, res) => {
         }
       }
     } catch(s3e){ console.log('S3 delete skip:', s3e.message); }
-
-    // FIXED: if this profile is a father/mother, clear children references (Option 2)
     await pool.query('UPDATE profiles SET father_id=NULL WHERE father_id=?', [profileId]);
     await pool.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=?', [profileId]);
-
     await pool.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
     await pool.query('DELETE FROM profiles WHERE id=?', [profileId]);
     res.json({ success: true });
@@ -240,15 +228,12 @@ app.post('/api/profiles', async (req, res) => {
   try {
     await conn.beginTransaction();
     const { id, display_name, relation_label, relation, owner_user_id, my_profile_id, photo_url, dob, name, bio, location, gender, father_id, mother_id } = req.body;
-
     const finalName = display_name || name;
     const finalId = id || `pr_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
-    const finalRelation = relation || relation_label || 'Family'; // Father/Mother/Sibling/Spouse/Child
+    const finalRelation = relation || relation_label || 'Family';
     const myId = my_profile_id || null;
-
     if (!finalName) { await conn.rollback(); return res.status(400).json({ error: "display_name required" }); }
     if (!owner_user_id) { await conn.rollback(); return res.status(400).json({ error: "owner_user_id required" }); }
-
     let newFatherId = father_id || null;
     let newMotherId = mother_id || null;
     let newGender = gender || null;
@@ -256,18 +241,14 @@ app.post('/api/profiles', async (req, res) => {
       if (finalRelation === 'Father') newGender = 'Male';
       else if (finalRelation === 'Mother') newGender = 'Female';
     }
-
     let me = null;
     let mySpouseId = null;
-
     if (myId) {
       const [meRows] = await conn.query('SELECT * FROM profiles WHERE id=?', [myId]);
       me = meRows[0];
       if (me) {
         const [spRows] = await conn.query(`SELECT related_profile_id FROM profile_relations WHERE owner_profile_id=? AND relation_type='Spouse' LIMIT 1`, [myId]);
         mySpouseId = spRows[0]?.related_profile_id || null;
-
-        // Auto decide parents for new profile
         if (finalRelation === 'Child') {
           if (me.gender === 'Male' || me.gender === null) {
             newFatherId = myId;
@@ -280,22 +261,16 @@ app.post('/api/profiles', async (req, res) => {
           newFatherId = me.father_id;
           newMotherId = me.mother_id;
         }
-        // For Father/Mother, new profile has no parents, but ME will get it as parent later
       }
     }
-
-    // 1. Insert new profile
     await conn.execute(
       `INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId]
     );
-
-    // 2. Auto link based on relation
     if (me) {
       if (finalRelation === 'Father') {
         await conn.query(`UPDATE profiles SET father_id=? WHERE id=?`, [finalId, myId]);
-        // update siblings who share same old father_id
         if (me.father_id) {
           await conn.query(`UPDATE profiles SET father_id=? WHERE father_id=? AND id!=?`, [finalId, me.father_id, finalId]);
         }
@@ -305,7 +280,7 @@ app.post('/api/profiles', async (req, res) => {
           await conn.query(`UPDATE profiles SET mother_id=? WHERE mother_id=? AND id!=?`, [finalId, me.mother_id, finalId]);
         }
       } else if (finalRelation === 'Spouse') {
-        const groupId = `sg_${Date.now()}`;
+        const groupId = null;
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
         const rel2 = `rel_${Date.now()+1}_${Math.random().toString(36).substr(2,3)}`;
         await conn.execute(
@@ -313,7 +288,6 @@ app.post('/api/profiles', async (req, res) => {
           [rel1, myId, finalId, 'Spouse', groupId, rel2, finalId, myId, 'Spouse', groupId]
         );
       } else if (finalRelation === 'Sibling') {
-        // optional Sibling relation for quick lookup
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
         const rel2 = `rel_${Date.now()+1}_${Math.random().toString(36).substr(2,3)}`;
         try {
@@ -322,19 +296,15 @@ app.post('/api/profiles', async (req, res) => {
             [rel1, myId, finalId, 'Sibling', rel2, finalId, myId, 'Sibling']
           );
         } catch(e) {
-          // if table requires spouse_group column, insert with null
           await conn.execute(
             `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`,
             [rel1, myId, finalId, 'Sibling', null, rel2, finalId, myId, 'Sibling', null]
           );
         }
       }
-      // Child needs no relation table, father_id/mother_id already set above
     }
-
     await conn.commit();
     res.json({ success: true, id: finalId, father_id: newFatherId, mother_id: newMotherId });
-
   } catch (err) {
     await conn.rollback();
     console.error("POST /api/profiles error:", err.message);
