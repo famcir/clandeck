@@ -132,7 +132,7 @@ app.get('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- NEW: FAMILY TREE FOR ANY PROFILE (USING father_id/mother_id + profile_relations for Spouse) ---
+// --- FIXED: FAMILY TREE FOR ANY PROFILE (BOTH DIRECTION SPOUSE) ---
 app.get('/api/family-tree/:profileId', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -142,11 +142,29 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     if (!self) return res.json([]);
 
     const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [self.owner_user_id]);
-    const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id=? AND relation_type='Spouse'`, [profileId]);
 
-    const spouseIds = spouseRelations.map(r => r.related_profile_id);
+    const [spouseRelations] = await pool.query(`
+      SELECT * FROM profile_relations
+      WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)
+    `, [profileId, profileId]);
+
+    const spouseIds = spouseRelations.map(r => {
+      return r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id;
+    });
+
     const children = allProfiles.filter(p => p.father_id === profileId || p.mother_id === profileId);
-    const siblings = allProfiles.filter(p => p.id!== profileId && ((self.father_id && p.father_id === self.father_id) || (self.mother_id && p.mother_id === self.mother_id)));
+
+    const siblings = allProfiles.filter(p => {
+      if (p.id === profileId) return false;
+      if (!self.father_id &&!self.mother_id) return false;
+      if (self.father_id && self.mother_id) {
+        return p.father_id === self.father_id && p.mother_id === self.mother_id;
+      }
+      if (self.father_id) return p.father_id === self.father_id;
+      if (self.mother_id) return p.mother_id === self.mother_id;
+      return false;
+    });
+
     const father = allProfiles.find(p => p.id === self.father_id);
     const mother = allProfiles.find(p => p.id === self.mother_id);
     const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
@@ -287,7 +305,6 @@ app.post('/api/profiles', async (req, res) => {
           `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`,
           [rel1, myId, finalId, 'Spouse', groupId, rel2, finalId, myId, 'Spouse', groupId]
         );
-        // FIX: If child was added BEFORE spouse, update child's other parent now
         try {
           if (me.gender === 'Female') {
             await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='')`, [finalId, myId]);
