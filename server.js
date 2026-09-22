@@ -50,7 +50,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool ex
 app.post('/api/register', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not configured" });
   const { id, name, email, password, uname } = req.body;
-  const finalUname = uname || email; // if frontend sends only email, use it as uname fallback
+  const finalUname = uname || email;
   try {
     try { await pool.query("ALTER TABLE users ADD COLUMN uname VARCHAR(255) UNIQUE"); } catch(e) {}
     await pool.execute("INSERT INTO users (id, name, email, uname, password, status) VALUES (?,?,?,?,?,?)", [id, name, email || finalUname, finalUname, password, 'active']);
@@ -87,13 +87,52 @@ app.post('/api/share-temp-user', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { email, password, uname } = req.body;
-  const loginId = uname || email; // frontend now sends uname
+  const loginId = uname || email;
   try {
     try { await pool.query("ALTER TABLE users ADD COLUMN uname VARCHAR(255)"); } catch(e) {}
-    const [rows] = await pool.execute("SELECT id, name, email, uname FROM users WHERE (uname=? OR email=?) AND password=?", [loginId, loginId, password]);
+    try { await pool.query("ALTER TABLE users ADD COLUMN shared_profile_id VARCHAR(255)"); } catch(e) {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN is_temp TINYINT DEFAULT 0"); } catch(e) {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN invited_by_user_id VARCHAR(255)"); } catch(e) {}
+    const [rows] = await pool.execute("SELECT id, name, email, uname, shared_profile_id, is_temp FROM users WHERE (uname=? OR email=?) AND password=?", [loginId, loginId, password]);
     if (rows.length === 0) return res.status(400).json({ error: "Wrong username or password" });
-    res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email, uname: rows[0].uname, token: "token-" + rows[0].id });
+    res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email, uname: rows[0].uname, shared_profile_id: rows[0].shared_profile_id, is_temp: rows[0].is_temp, token: "token-" + rows[0].id });
   } catch (err) { res.status(500).json({ error: "DB Error: " + err.message }); }
+});
+
+// --- CLAIM ACCOUNT: id = shared_profile_id, is_temp=0, profile owner_user_id=id, is_claimed=1 ---
+app.post('/api/claim-account', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  const { userId, newUname, newPassword } = req.body;
+  if (!userId ||!newUname ||!newPassword) return res.status(400).json({error: "Missing fields"});
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query("SELECT id, shared_profile_id FROM users WHERE id=?", [userId]);
+    if (rows.length===0) throw new Error("User not found");
+    const user = rows[0];
+    const sharedProfileId = user.shared_profile_id;
+    if (!sharedProfileId) throw new Error("No shared_profile_id to claim");
+    if (user.id === sharedProfileId) {
+      await conn.rollback();
+      return res.json({success: true, id: user.id, message: "Already claimed"});
+    }
+    const newId = sharedProfileId;
+
+    const [unameCheck] = await conn.query("SELECT id FROM users WHERE uname=? AND id!=?", [newUname, userId]);
+    if (unameCheck.length>0) throw new Error("Username already taken");
+
+    await conn.query("UPDATE profiles SET owner_user_id=?, is_claimed=1 WHERE id=?", [newId, sharedProfileId]);
+    await conn.query("UPDATE profiles SET owner_user_id=? WHERE owner_user_id=?", [newId, userId]);
+
+    await conn.query("UPDATE users SET id=?, uname=?, email=?, password=?, is_temp=0, shared_profile_id=NULL WHERE id=?", [newId, newUname, newUname, newPassword, userId]);
+
+    await conn.commit();
+    res.json({success: true, id: newId, uname: newUname});
+  } catch(e){
+    await conn.rollback();
+    console.error("claim error", e.message);
+    res.status(500).json({error: e.message});
+  } finally { conn.release(); }
 });
 
 app.get('/api/users/:id', async (req, res) => {
@@ -138,7 +177,6 @@ app.get('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- FIXED: FAMILY TREE FOR ANY PROFILE (BOTH DIRECTION SPOUSE) ---
 app.get('/api/family-tree/:profileId', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -146,20 +184,15 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const [selfRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [profileId]);
     const self = selfRows[0];
     if (!self) return res.json([]);
-
     const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [self.owner_user_id]);
-
     const [spouseRelations] = await pool.query(`
       SELECT * FROM profile_relations
       WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)
     `, [profileId, profileId]);
-
     const spouseIds = spouseRelations.map(r => {
       return r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id;
     });
-
     const children = allProfiles.filter(p => p.father_id === profileId || p.mother_id === profileId);
-
     const siblings = allProfiles.filter(p => {
       if (p.id === profileId) return false;
       if (!self.father_id &&!self.mother_id) return false;
@@ -170,11 +203,9 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
       if (self.mother_id) return p.mother_id === self.mother_id;
       return false;
     });
-
     const father = allProfiles.find(p => p.id === self.father_id);
     const mother = allProfiles.find(p => p.id === self.mother_id);
     const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
-
     const result = [];
     result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
     if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
@@ -245,7 +276,6 @@ app.delete('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- ADD PROFILE WITH AUTO PARENT LINK + AUTO SPOUSE LINK FOR PARENTS ---
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();

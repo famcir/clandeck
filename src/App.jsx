@@ -17,6 +17,14 @@ export default function App() {
   const [userId, setUserId] = useState("");
   const [page, setPage] = useState("login");
 
+  // claim flow states
+  const [showClaim, setShowClaim] = useState(false);
+  const [claimStep, setClaimStep] = useState(1);
+  const [newUname, setNewUname] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [claimLoading, setClaimLoading] = useState(false);
+  const [pendingUser, setPendingUser] = useState(null);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
@@ -42,6 +50,16 @@ export default function App() {
 
       if (!res.ok) throw new Error(data.error || data.message || "Login failed");
 
+      // check id vs shared_profile_id
+      if (data.shared_profile_id && data.id !== data.shared_profile_id) {
+        setPendingUser(data);
+        setNewUname(data.uname || username.trim());
+        setShowClaim(true);
+        setClaimStep(1);
+        setLoading(false);
+        return;
+      }
+
       const name = data.name || data.user?.name || data.fullName || username;
       const id = data.id || data.userId || data.uname || data.email || data.user?._id;
 
@@ -62,6 +80,40 @@ export default function App() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleClaimSave = async () => {
+    if (!newUname.trim() ||!newPass.trim()) {
+      setError("Please fill username and password");
+      return;
+    }
+    setClaimLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/claim-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: pendingUser.id, newUname: newUname.trim(), newPassword: newPass.trim() })
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error(text); }
+      if (!res.ok) throw new Error(data.error || "Claim failed");
+
+      setUserName(pendingUser.name || newUname);
+      setUserId(data.id);
+      localStorage.setItem('userName', pendingUser.name || newUname);
+      localStorage.setItem('userId', data.id);
+      localStorage.setItem('token', "token-" + data.id);
+
+      setShowClaim(false);
+      setShowPopup(true);
+
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setClaimLoading(false);
     }
   };
 
@@ -121,6 +173,42 @@ export default function App() {
             <p>successfully logged in:</p>
             <h2 className="popup-id">{userName}</h2>
             <button className="login-btn" onClick={handlePopupOk}>OK</button>
+          </div>
+        </div>
+      )}
+
+      {showClaim && (
+        <div className="popup-overlay" style={{zIndex: 9999}}>
+          <div className="popup-box" style={{maxWidth: '380px'}}>
+            {claimStep===1? (
+              <>
+                <h3>Claim your account? 🔐</h3>
+                <p style={{margin:'12px 0', fontSize:'13px'}}>This profile was shared with you. Do you want to claim it as your own?</p>
+                {error && <p className="error-msg">{error}</p>}
+                <div style={{display:'flex', gap:'10px', marginTop:'16px'}}>
+                  <button className="login-btn" style={{flex:1, background:'#eee', color:'#000'}} onClick={()=>{setShowClaim(false); setPendingUser(null);}}>Later</button>
+                  <button className="login-btn" style={{flex:1}} onClick={()=>{setClaimStep(2); setError("");}}>Yes</button>
+                </div>
+              </>
+            ):(
+              <>
+                <h3>Change username & password 🔑</h3>
+                <p style={{fontSize:'12px', color:'#666', marginBottom:'12px'}}>Set your new login credentials</p>
+                <div className="form-group">
+                  <label>New Username</label>
+                  <input type="text" placeholder="Choose new username" value={newUname} onChange={e=>setNewUname(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>New Password</label>
+                  <input type="text" placeholder="Choose new password" value={newPass} onChange={e=>setNewPass(e.target.value)} />
+                </div>
+                {error && <p className="error-msg">{error}</p>}
+                <div style={{display:'flex', gap:'10px', marginTop:'16px'}}>
+                  <button className="login-btn" style={{flex:1, background:'#eee', color:'#000'}} onClick={()=>setClaimStep(1)}>Back</button>
+                  <button className="login-btn" style={{flex:1}} onClick={handleClaimSave} disabled={claimLoading}>{claimLoading? "Saving..." : "Save"}</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
