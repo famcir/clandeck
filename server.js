@@ -239,7 +239,7 @@ app.delete('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- NEW: ADD PROFILE WITH AUTO PARENT LINK (Option 2) ---
+// --- ADD PROFILE WITH AUTO PARENT LINK (Option 2) - WITH SIBLING FIX ---
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
@@ -292,11 +292,22 @@ app.post('/api/profiles', async (req, res) => {
         if (me.father_id) {
           await conn.query(`UPDATE profiles SET father_id=? WHERE father_id=? AND id!=?`, [finalId, me.father_id, finalId]);
         }
+        try {
+          if (me.mother_id) {
+            await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='') AND id!=?`, [finalId, me.mother_id, finalId]);
+          }
+        } catch(e) { console.log('father sibling fix skip', e.message); }
       } else if (finalRelation === 'Mother') {
         await conn.query(`UPDATE profiles SET mother_id=? WHERE id=?`, [finalId, myId]);
         if (me.mother_id) {
           await conn.query(`UPDATE profiles SET mother_id=? WHERE mother_id=? AND id!=?`, [finalId, me.mother_id, finalId]);
         }
+        try {
+          if (me.father_id) {
+            await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='') AND id!=?`, [finalId, me.father_id, finalId]);
+          }
+          await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='')`, [finalId, myId]);
+        } catch(e) { console.log('mother sibling fix skip', e.message); }
       } else if (finalRelation === 'Spouse') {
         const groupId = null;
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
