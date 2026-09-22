@@ -49,31 +49,35 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool ex
 
 app.post('/api/register', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not configured" });
-  const { id, name, email, password } = req.body;
+  const { id, name, email, password, uname } = req.body;
+  const finalUname = uname || email; // if frontend sends only email, use it as uname fallback
   try {
-    await pool.execute("INSERT INTO users (id, name, email, password, status) VALUES (?,?,?,?,?)", [id, name, email, password, 'active']);
+    try { await pool.query("ALTER TABLE users ADD COLUMN uname VARCHAR(255) UNIQUE"); } catch(e) {}
+    await pool.execute("INSERT INTO users (id, name, email, uname, password, status) VALUES (?,?,?,?,?,?)", [id, name, email || finalUname, finalUname, password, 'active']);
     res.json({ message: "User created!", id });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/share-temp-user', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
-  const { id, name, email, password, profile_id, invited_by_user_id } = req.body;
+  const { id, name, email, password, profile_id, invited_by_user_id, uname } = req.body;
+  const finalUname = uname || email;
   try {
+    try { await pool.query("ALTER TABLE users ADD COLUMN uname VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN invited_by_user_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN shared_profile_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN is_temp TINYINT DEFAULT 0"); } catch(e) {}
 
     await pool.execute(
-      "INSERT INTO users (id, name, email, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?)",
-      [id, name, email, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]
+      "INSERT INTO users (id, name, email, uname, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?,?)",
+      [id, name, email || finalUname, finalUname, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]
     );
-    res.json({ success: true, username: email, password: password || 'pw1234' });
+    res.json({ success: true, username: finalUname, password: password || 'pw1234' });
   } catch (err) {
     if (err.message.includes('Duplicate')) {
       try {
-        await pool.execute("UPDATE users SET password=?, invited_by_user_id=?, shared_profile_id=? WHERE email=?", [password || 'pw1234', invited_by_user_id, profile_id || null, email]);
-        return res.json({ success: true, username: email, password: password || 'pw1234', reused: true });
+        await pool.execute("UPDATE users SET password=?, invited_by_user_id=?, shared_profile_id=?, uname=? WHERE email=? OR uname=?", [password || 'pw1234', invited_by_user_id, profile_id || null, finalUname, email, finalUname]);
+        return res.json({ success: true, username: finalUname, password: password || 'pw1234', reused: true });
       } catch(e2) { return res.status(500).json({ error: e2.message }); }
     }
     res.status(500).json({ error: err.message });
@@ -82,18 +86,20 @@ app.post('/api/share-temp-user', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
-  const { email, password } = req.body;
+  const { email, password, uname } = req.body;
+  const loginId = uname || email; // frontend now sends uname
   try {
-    const [rows] = await pool.execute("SELECT id, name, email FROM users WHERE email=? AND password=?", [email, password]);
-    if (rows.length === 0) return res.status(400).json({ error: "Wrong email or password" });
-    res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email, token: "token-" + rows[0].id });
+    try { await pool.query("ALTER TABLE users ADD COLUMN uname VARCHAR(255)"); } catch(e) {}
+    const [rows] = await pool.execute("SELECT id, name, email, uname FROM users WHERE (uname=? OR email=?) AND password=?", [loginId, loginId, password]);
+    if (rows.length === 0) return res.status(400).json({ error: "Wrong username or password" });
+    res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email, uname: rows[0].uname, token: "token-" + rows[0].id });
   } catch (err) { res.status(500).json({ error: "DB Error: " + err.message }); }
 });
 
 app.get('/api/users/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const [rows] = await pool.execute("SELECT id, name, email, photo_url FROM users WHERE id=?", [req.params.id]);
+    const [rows] = await pool.execute("SELECT id, name, email, uname, photo_url FROM users WHERE id=?", [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: "User not found" });
     res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }

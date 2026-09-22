@@ -29,7 +29,7 @@ export default function App() {
       const res = await fetch(`/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: username.trim(), password })
+        body: JSON.stringify({ uname: username.trim(), password })
       });
 
       const text = await res.text();
@@ -42,8 +42,8 @@ export default function App() {
 
       if (!res.ok) throw new Error(data.error || data.message || "Login failed");
 
-      const name = data.name || data.user?.name || data.fullName || username.split('@')[0];
-      const id = data.id || data.userId || data.email || data.user?._id;
+      const name = data.name || data.user?.name || data.fullName || username;
+      const id = data.id || data.userId || data.uname || data.email || data.user?._id;
 
       setUserName(name);
       setUserId(id);
@@ -96,8 +96,8 @@ export default function App() {
           <p className="form-desc">Welcome back — sign in to continue</p>
           <form onSubmit={handleLogin}>
             <div className="form-group">
-              <label>Email</label>
-              <input type="text" placeholder="you@example.com" value={username} onChange={(e) => setUsername(e.target.value)} required />
+              <label>Username</label>
+              <input type="text" placeholder="e.g. UNTeju" value={username} onChange={(e) => setUsername(e.target.value)} required />
             </div>
             <div className="form-group">
               <label>Password</label>
