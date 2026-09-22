@@ -239,7 +239,7 @@ app.delete('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- ADD PROFILE WITH AUTO PARENT LINK (Option 2) - WITH SIBLING FIX ---
+// --- ADD PROFILE WITH AUTO PARENT LINK + AUTO SPOUSE LINK FOR PARENTS ---
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
@@ -296,7 +296,15 @@ app.post('/api/profiles', async (req, res) => {
           if (me.mother_id) {
             await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='') AND id!=?`, [finalId, me.mother_id, finalId]);
           }
-        } catch(e) { console.log('father sibling fix skip', e.message); }
+          if (me.mother_id) {
+            const [check] = await conn.query(`SELECT id FROM profile_relations WHERE ((owner_profile_id=? AND related_profile_id=?) OR (owner_profile_id=? AND related_profile_id=?)) AND relation_type='Spouse'`, [finalId, me.mother_id, me.mother_id, finalId]);
+            if (check.length === 0) {
+              const relA = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
+              const relB = `rel_${Date.now()+1}_${Math.random().toString(36).substr(2,3)}`;
+              await conn.execute(`INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`, [relA, finalId, me.mother_id, 'Spouse', null, relB, me.mother_id, finalId, 'Spouse', null]);
+            }
+          }
+        } catch(e) { console.log('father auto-spouse fix skip', e.message); }
       } else if (finalRelation === 'Mother') {
         await conn.query(`UPDATE profiles SET mother_id=? WHERE id=?`, [finalId, myId]);
         if (me.mother_id) {
@@ -307,7 +315,15 @@ app.post('/api/profiles', async (req, res) => {
             await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='') AND id!=?`, [finalId, me.father_id, finalId]);
           }
           await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='')`, [finalId, myId]);
-        } catch(e) { console.log('mother sibling fix skip', e.message); }
+          if (me.father_id) {
+            const [check] = await conn.query(`SELECT id FROM profile_relations WHERE ((owner_profile_id=? AND related_profile_id=?) OR (owner_profile_id=? AND related_profile_id=?)) AND relation_type='Spouse'`, [finalId, me.father_id, me.father_id, finalId]);
+            if (check.length === 0) {
+              const relA = `rel_${Date.now()+2}_${Math.random().toString(36).substr(2,3)}`;
+              const relB = `rel_${Date.now()+3}_${Math.random().toString(36).substr(2,3)}`;
+              await conn.execute(`INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`, [relA, finalId, me.father_id, 'Spouse', null, relB, me.father_id, finalId, 'Spouse', null]);
+            }
+          }
+        } catch(e) { console.log('mother auto-spouse fix skip', e.message); }
       } else if (finalRelation === 'Spouse') {
         const groupId = null;
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
