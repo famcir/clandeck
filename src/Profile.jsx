@@ -16,7 +16,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const [newBio, setNewBio] = useState('');
   const [newPhoto, setNewPhoto] = useState(null);
   const [newPreview, setNewPreview] = useState('');
-  const [newSpouseGroup, setNewSpouseGroup] = useState(1);
+  const [selectedSpouseForChild, setSelectedSpouseForChild] = useState('');
   const [adding, setAdding] = useState(false);
   const [editingFamilyId, setEditingFamilyId] = useState(null);
 
@@ -29,19 +29,18 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
   useEffect(() => {
     fetch(`/api/profiles?owner_user_id=${currentUserId}`)
-    .then(res => res.json())
-    .then(data => setProfiles(data || []))
-    .catch(() => setProfiles([]));
+  .then(res => res.json())
+  .then(data => setProfiles(data || []))
+  .catch(() => setProfiles([]));
   }, [currentUserId]);
 
-  // NEW: fetch self's spouse relations
   const selfForRel = profiles.find(p => p.id === currentUserId) || profiles.find(p => p.relation_label?.toLowerCase() === 'self') || profiles[0];
   useEffect(() => {
     if (!selfForRel?.id) return;
     fetch(`/api/relations?owner_profile_id=${selfForRel.id}`)
-     .then(r => r.json())
-     .then(d => setRelations(d || []))
-     .catch(() => setRelations([]));
+   .then(r => r.json())
+   .then(d => setRelations(d || []))
+   .catch(() => setRelations([]));
   }, [selfForRel?.id, profiles.length]);
 
   const self = profiles.find(p => p.id === currentUserId)
@@ -138,27 +137,27 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         setProfiles(refreshed || []);
         setShowAddmodel(false);
         setEditingFamilyId(null);
-        setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview('');
+        setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild('');
       }catch(e){ alert('Failed: '+e.message); }finally{ setAdding(false); }
       return;
     }
 
-    // NEW: prevent duplicate Father/Mother/Spouse using father_id/mother_id logic
     if (['Father','Mother'].includes(newRelation)) {
       if (newRelation === 'Father' && self?.father_id) return alert(`Father already exists!`);
       if (newRelation === 'Mother' && self?.mother_id) return alert(`Mother already exists!`);
-    }
-    if (newRelation === 'Spouse') {
-      const hasSpouse = relations.some(r => r.relation_type === 'Spouse');
-      // allow multiple spouses? If you want single spouse, uncomment below:
-      // if (hasSpouse) return alert(`Spouse already exists!`);
     }
 
     setAdding(true);
     try {
       const genderForNew = newRelation === 'Father'? 'Male' : newRelation === 'Mother'? 'Female' : newRelation === 'Spouse'? (self?.gender === 'Male'? 'Female' : 'Male') : null;
 
-      // NEW API CALL - auto parent link handled in server.js
+      const spouseList = profiles.filter(p => relations.filter(r => r.relation_type === 'Spouse').map(r=>r.related_profile_id).includes(p.id));
+      let linkedSpouseId = null;
+      if (newRelation === 'Child') {
+        if (spouseList.length === 1) linkedSpouseId = spouseList[0].id;
+        else if (spouseList.length > 1) linkedSpouseId = selectedSpouseForChild || spouseList[0].id;
+      }
+
       const res1 = await fetch('/api/profiles', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
@@ -170,7 +169,8 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
           relation: newRelation,
           gender: genderForNew,
           photo_url: '',
-          dob: null
+          dob: null,
+          spouse_id: linkedSpouseId
         })
       });
       const data1 = await res1.json();
@@ -188,11 +188,10 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
       const refreshed = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json());
       setProfiles(refreshed || []);
-      // refresh relations also
       const relRef = await fetch(`/api/relations?owner_profile_id=${self.id}`).then(r=>r.json());
       setRelations(relRef || []);
       setShowAddmodel(false);
-      setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview('');
+      setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild('');
     } catch(e){ alert('Failed: ' + e.message); } finally { setAdding(false); }
   };
 
@@ -206,7 +205,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     setEditingFamilyId(p.id);
     setNewName(p.display_name || '');
     setNewBio(p.bio || '');
-    // guess relation from father_id/mother_id
     let guessed = 'Sibling';
     if (p.id === self?.father_id) guessed = 'Father';
     else if (p.id === self?.mother_id) guessed = 'Mother';
@@ -215,19 +213,18 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     setNewRelation(guessed);
     setNewPreview(p.photo_url || '');
     setNewPhoto(null);
+    setSelectedSpouseForChild('');
     setShowAddmodel(true);
   };
 
   const goDeck = () => { if (onDeck) onDeck(); else if (onBack) onBack(); };
   if (!self) return <div className="p-10">Loading {currentUserId}...</div>;
 
-  // NEW: Option 2 logic for tree - using father_id/mother_id
   const father = profiles.find(p => p.id === self.father_id);
   const mother = profiles.find(p => p.id === self.mother_id);
   const spouseIds = relations.filter(r => r.relation_type === 'Spouse').map(r => r.related_profile_id);
   const spouse = profiles.find(p => spouseIds.includes(p.id));
-  const siblings = profiles.filter(p => p.id!== self.id && self.father_id && self.mother_id? (p.father_id === self.father_id || p.mother_id === self.mother_id) : (p.father_id === self.father_id || p.mother_id === self.mother_id) && p.father_id && p.mother_id);
-  // fallback for siblings when father_id is null - use both check
+  const spouseList = profiles.filter(p => spouseIds.includes(p.id));
   const siblingsFixed = profiles.filter(p => {
     if (p.id === self.id) return false;
     if (self.father_id && p.father_id === self.father_id) return true;
@@ -238,10 +235,12 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
   const Node = ({ p, big }) => {
     if (!p) return null;
+    const hasPhoto = p.photo_url && p.photo_url.trim()!== '';
+    const initial = (p.display_name || '?').trim().charAt(0).toUpperCase();
     return (
       <div className="flex flex-col items-center cursor-pointer group relative shrink-0">
-        <div className={`${big? 'tree-node-big bg-[#c9ad83] text-white' : 'tree-node bg-[#f8f5f0]'} rounded-[14px] border flex items-center justify-center overflow-hidden shrink-0`}>
-          {p.photo_url? <img src={p.photo_url} className="w-full h-full rounded-[14px] object-cover" /> : <span className="text-[clamp(14px,3cqw,22px)]">{p.display_name?.[0]}</span>}
+        <div className={`${big? 'tree-node-big' : 'tree-node'} rounded-[14px] border flex items-center justify-center overflow-hidden shrink-0 ${big? 'bg-[#c9ad83] text-white' : 'bg-[#f8f5f0] text-[#5a4a32]'}`}>
+          {hasPhoto? <img src={p.photo_url} className="w-full h-full rounded-[14px] object-cover" alt={p.display_name} /> : <span className="font-extrabold text-[clamp(14px,3cqw,22px)]">{initial}</span>}
         </div>
         <div className="mt-1 flex flex-col items-center text-center leading-none">
           <p className="tree-label font-bold max-w-[64px] truncate">{p.display_name}</p>
@@ -261,11 +260,11 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{ fontFamily: 'Plus Jakarta Sans' }}>
       <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');
-     .card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}
+   .card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}
       input,textarea{outline:none}
-     .tree-node{ width: clamp(44px, 8.5cqw, 62px); height: clamp(44px, 8.5cqw, 62px); font-size: clamp(16px, 3.5cqw, 22px); }
-     .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
-     .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
+   .tree-node{ width: clamp(44px, 8.5cqw, 62px); height: clamp(44px, 8.5cqw, 62px); font-size: clamp(16px, 3.5cqw, 22px); }
+   .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
+   .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
       `}</style>
 
       <header className="h-[68px] bg-[#fffefb] border-b flex items-center px-6 justify-between">
@@ -275,7 +274,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         </div>
         <div className="flex items-center gap-3">
           <button onClick={onLogout} className="px-4 h-9 bg-black text-white rounded-full text-[12px]">Logout</button>
-          <img src={self.photo_url} className="w-9 h-9 rounded-full object-cover" alt="" />
+          {self?.photo_url? <img src={self.photo_url} className="w-9 h-9 rounded-full object-cover" alt="" /> : <div className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
         </div>
       </header>
 
@@ -283,7 +282,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         <div className="col-span-12 lg:col-span-3 card p-6">
           <div className="text-center">
             <div className="relative w-[100px] h-[100px] mx-auto group cursor-pointer" onClick={() =>!isEditing && fileInputRef.current.click()}>
-              <img src={self.photo_url} className="w-[100px] h-[100px] rounded-[20px] mx-auto object-cover" alt="" />
+              {self?.photo_url? <img src={self.photo_url} className="w-[100px] h-[100px] rounded-[20px] mx-auto object-cover" alt="" /> : <div className="w-[100px] h-[100px] rounded-[20px] mx-auto bg-[#c9ad83] text-white flex items-center justify-center text-[32px] font-extrabold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
               <div className="absolute inset-0 bg-black/50 rounded-[20px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                 <span className="text-white text-[11px] font-bold">{uploading? 'Uploading...' : 'Change'}</span>
               </div>
@@ -329,36 +328,26 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
         <div className="col-span-12 lg:col-span-6 card p-6">
           <div className="flex justify-between items-center mb-4">
-            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">+ Add Family Member</button>
+            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">+ Add Family Member</button>
             <span className="text-[11px] text-gray-500">{profiles.length} members</span>
           </div>
 
-          {/* === PAKKA TREE - NO INNER BOX, SPOUSE CLOSE === */}
           <div className="w-full flex justify-center">
             <div className="relative w-full overflow-hidden" style={{ maxWidth: '520px', height: 'clamp(360px, 40vw, 440px)', containerType: 'inline-size' }}>
-
-              {/* PARENTS TOP EXACT CENTER - CLOSE */}
               <div className="absolute left-1/2 -translate-x-1/2 top-[2%] flex gap-[2px] z-10">
                 {father && <Node p={father} />}
                 {mother && <Node p={mother} />}
               </div>
-
-              {/* MIDDLE - SPOUSE CLOSE TO USER (12px gap) */}
               <div className="absolute left-1/2 -translate-x-1/2 top-[38%] flex items-center gap-[12px]">
                 {spouse && <Node p={spouse} />}
                 <Node p={self} big />
               </div>
-
-              {/* SIBLINGS RIGHT SIDE BETWEEN PARENTS AND USER - CLOSE */}
               <div className="absolute right-[4%] top-[18%] flex gap-[2px] max-w-[36%] flex-wrap justify-end">
                 {siblingsFixed.map(s => <Node key={s.id} p={s} />)}
               </div>
-
-              {/* CHILDREN BOTTOM - MIDDLE OF USER+SPOUSE - CLOSE */}
               <div className="absolute left-[47%] bottom-[5%] -translate-x-1/2 flex gap-[2px] justify-center">
                 {children.map(c => <Node key={c.id} p={c} />)}
               </div>
-
             </div>
           </div>
         </div>
@@ -375,15 +364,18 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
           <div className="bg-white rounded-[20px] w-full max-w-[380px] p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-extrabold text-[16px]">{editingFamilyId? 'Edit Family Member' : 'Add Family Member'}</h3>
-              <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); }} className="w-8 h-8 bg-gray-100 rounded-full">✕</button>
+              <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); }} className="w-8 h-8 bg-gray-100 rounded-full">✕</button>
             </div>
             <div className="space-y-3">
               <select value={newRelation} onChange={e=>setNewRelation(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-xl px-3 text-[12px] font-bold">
                 <option>Father</option><option>Mother</option><option>Sibling</option><option>Spouse</option><option>Child</option>
               </select>
-              {newRelation === 'Child' && (
-                <select value={newSpouseGroup} onChange={e=>setNewSpouseGroup(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-xl px-3 text-[12px]">
-                  <option value={1}>Spouse 1</option><option value={2}>Spouse 2</option><option value={3}>Spouse 3</option>
+              {newRelation === 'Child' && spouseList.length > 1 && (
+                <select value={selectedSpouseForChild} onChange={e=>setSelectedSpouseForChild(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-xl px-3 text-[12px]">
+                  <option value="">Select Spouse (Mother/Father of child)</option>
+                  {spouseList.map(s => (
+                    <option key={s.id} value={s.id}>{s.display_name}</option>
+                  ))}
                 </select>
               )}
               <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Full Name" className="w-full h-10 bg-[#f8f5f0] rounded-xl px-3 text-[12px]" />
