@@ -67,7 +67,6 @@ app.post('/api/share-temp-user', async (req, res) => {
     try { await pool.query("ALTER TABLE users ADD COLUMN invited_by_user_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN shared_profile_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN is_temp TINYINT DEFAULT 0"); } catch(e) {}
-
     await pool.execute(
       "INSERT INTO users (id, name, email, uname, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?,?)",
       [id, name, email || finalUname, finalUname, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]
@@ -99,7 +98,7 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "DB Error: " + err.message }); }
 });
 
-// --- CLAIM ACCOUNT FIXED: FK CHECK DISABLE ---
+// --- CLAIM ACCOUNT FIXED: FK + only claimed profile ---
 app.post('/api/claim-account', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { userId, newUname, newPassword } = req.body;
@@ -108,29 +107,20 @@ app.post('/api/claim-account', async (req, res) => {
   try {
     await conn.beginTransaction();
     await conn.query("SET FOREIGN_KEY_CHECKS=0");
-
     const [rows] = await conn.query("SELECT id, shared_profile_id FROM users WHERE id=?", [userId]);
     if (rows.length===0) throw new Error("User not found");
-    const user = rows[0];
-    const sharedProfileId = user.shared_profile_id;
+    const sharedProfileId = rows[0].shared_profile_id;
     if (!sharedProfileId) throw new Error("No shared_profile_id to claim");
-    if (user.id === sharedProfileId) {
+    if (rows[0].id === sharedProfileId) {
       await conn.query("SET FOREIGN_KEY_CHECKS=1");
       await conn.rollback();
-      return res.json({success: true, id: user.id, message: "Already claimed"});
+      return res.json({success: true, id: rows[0].id, message: "Already claimed"});
     }
     const newId = sharedProfileId;
-
     const [unameCheck] = await conn.query("SELECT id FROM users WHERE uname=? AND id!=?", [newUname, userId]);
     if (unameCheck.length>0) throw new Error("Username already taken");
-
-    // 1. Update users id first
     await conn.query("UPDATE users SET id=?, uname=?, email=?, password=?, is_temp=0, shared_profile_id=NULL WHERE id=?", [newId, newUname, newUname, newPassword, userId]);
-
-    // 2. Now update profiles owner
     await conn.query("UPDATE profiles SET owner_user_id=?, is_claimed=1 WHERE id=?", [newId, sharedProfileId]);
-    await conn.query("UPDATE profiles SET owner_user_id=? WHERE owner_user_id=?", [newId, userId]);
-
     await conn.query("SET FOREIGN_KEY_CHECKS=1");
     await conn.commit();
     res.json({success: true, id: newId, uname: newUname});
@@ -171,8 +161,46 @@ app.get('/api/profiles', async (req, res) => {
   try {
     const { owner_user_id } = req.query;
     if (!owner_user_id) return res.json([]);
-    const [rows] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
-    res.json(rows);
+    const [owned] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
+    let self = owned.find(p => p.id === owner_user_id);
+    if (!self) {
+      const [sRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [owner_user_id]);
+      self = sRows[0];
+    }
+    if (!self) return res.json(owned);
+    const [allProfiles] = await pool.query('SELECT * FROM profiles');
+    const [spouseRelations] = await pool.query(`
+      SELECT * FROM profile_relations
+      WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)
+    `, [self.id, self.id]);
+    const spouseIds = spouseRelations.map(r => r.owner_profile_id === self.id? r.related_profile_id : r.owner_profile_id);
+    const familyParentIds = [self.id,...spouseIds];
+    const father = allProfiles.find(p => p.id === self.father_id);
+    const mother = allProfiles.find(p => p.id === self.mother_id);
+    const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
+    const children = allProfiles.filter(p => {
+      if (p.id === self.id) return false;
+      if (spouseIds.includes(p.id)) return false;
+      return familyParentIds.includes(p.father_id) || familyParentIds.includes(p.mother_id);
+    });
+    const siblings = allProfiles.filter(p => {
+      if (p.id === self.id) return false;
+      if (spouseIds.includes(p.id)) return false;
+      if (children.find(c=>c.id===p.id)) return false;
+      if (!self.father_id &&!self.mother_id) return false;
+      if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
+      if (self.father_id) return p.father_id === self.father_id;
+      if (self.mother_id) return p.mother_id === self.mother_id;
+      return false;
+    });
+    const result = [];
+    result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
+    if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
+    if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
+    spouses.forEach(s => result.push({...s, relation_label: 'Spouse', computed_relation: 'Spouse'}));
+    siblings.forEach(s => result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}));
+    children.forEach(c => result.push({...c, relation_label: 'Child', computed_relation: 'Child'}));
+    res.json(result);
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
@@ -191,28 +219,31 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const [selfRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [profileId]);
     const self = selfRows[0];
     if (!self) return res.json([]);
-    const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [self.owner_user_id]);
+    const [allProfiles] = await pool.query('SELECT * FROM profiles');
     const [spouseRelations] = await pool.query(`
       SELECT * FROM profile_relations
       WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)
     `, [profileId, profileId]);
-    const spouseIds = spouseRelations.map(r => {
-      return r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id;
+    const spouseIds = spouseRelations.map(r => r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id);
+    const familyParentIds = [profileId,...spouseIds];
+    const father = allProfiles.find(p => p.id === self.father_id);
+    const mother = allProfiles.find(p => p.id === self.mother_id);
+    const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
+    const children = allProfiles.filter(p => {
+      if (p.id === profileId) return false;
+      if (spouseIds.includes(p.id)) return false;
+      return familyParentIds.includes(p.father_id) || familyParentIds.includes(p.mother_id);
     });
-    const children = allProfiles.filter(p => p.father_id === profileId || p.mother_id === profileId);
     const siblings = allProfiles.filter(p => {
       if (p.id === profileId) return false;
+      if (spouseIds.includes(p.id)) return false;
+      if (children.find(c=>c.id===p.id)) return false;
       if (!self.father_id &&!self.mother_id) return false;
-      if (self.father_id && self.mother_id) {
-        return p.father_id === self.father_id && p.mother_id === self.mother_id;
-      }
+      if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
       if (self.father_id) return p.father_id === self.father_id;
       if (self.mother_id) return p.mother_id === self.mother_id;
       return false;
     });
-    const father = allProfiles.find(p => p.id === self.father_id);
-    const mother = allProfiles.find(p => p.id === self.mother_id);
-    const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
     const result = [];
     result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
     if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
@@ -220,10 +251,6 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     spouses.forEach(s => result.push({...s, relation_label: 'Spouse', computed_relation: 'Spouse'}));
     siblings.forEach(s => result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}));
     children.forEach(c => result.push({...c, relation_label: 'Child', computed_relation: 'Child'}));
-    const addedIds = new Set(result.map(r => r.id));
-    allProfiles.forEach(p => {
-      if (!addedIds.has(p.id)) result.push({...p, relation_label: p.relation_label || 'Family', computed_relation: 'Family'});
-    });
     res.json(result);
   } catch (e) {
     console.error('family-tree error', e.message);
