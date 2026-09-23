@@ -98,7 +98,6 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "DB Error: " + err.message }); }
 });
 
-// --- CLAIM ACCOUNT FIXED: FK + only claimed profile ---
 app.post('/api/claim-account', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { userId, newUname, newPassword } = req.body;
@@ -169,10 +168,7 @@ app.get('/api/profiles', async (req, res) => {
     }
     if (!self) return res.json(owned);
     const [allProfiles] = await pool.query('SELECT * FROM profiles');
-    const [spouseRelations] = await pool.query(`
-      SELECT * FROM profile_relations
-      WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)
-    `, [self.id, self.id]);
+    const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)`, [self.id, self.id]);
     const spouseIds = spouseRelations.map(r => r.owner_profile_id === self.id? r.related_profile_id : r.owner_profile_id);
     const familyParentIds = [self.id,...spouseIds];
     const father = allProfiles.find(p => p.id === self.father_id);
@@ -220,10 +216,7 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const self = selfRows[0];
     if (!self) return res.json([]);
     const [allProfiles] = await pool.query('SELECT * FROM profiles');
-    const [spouseRelations] = await pool.query(`
-      SELECT * FROM profile_relations
-      WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)
-    `, [profileId, profileId]);
+    const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)`, [profileId, profileId]);
     const spouseIds = spouseRelations.map(r => r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id);
     const familyParentIds = [profileId,...spouseIds];
     const father = allProfiles.find(p => p.id === self.father_id);
@@ -262,28 +255,26 @@ app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
     const { display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id } = req.body;
-    await pool.query(
-      `UPDATE profiles SET display_name=COALESCE(?,display_name), dob=COALESCE(?,dob), photo_url=COALESCE(?,photo_url), is_claimed=COALESCE(?,is_claimed), bio=COALESCE(?,bio), location=COALESCE(?,location), gender=COALESCE(?,gender), father_id=COALESCE(?,father_id), mother_id=COALESCE(?,mother_id) WHERE id=?`,
-      [display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, req.params.id]
-    );
+    await pool.query(`UPDATE profiles SET display_name=COALESCE(?,display_name), dob=COALESCE(?,dob), photo_url=COALESCE(?,photo_url), is_claimed=COALESCE(?,is_claimed), bio=COALESCE(?,bio), location=COALESCE(?,location), gender=COALESCE(?,gender), father_id=COALESCE(?,father_id), mother_id=COALESCE(?,mother_id) WHERE id=?`, [display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, req.params.id]);
     res.json({ success: true });
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
+// --- DELETE WITH USER DELETE ---
 app.delete('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
+  const conn = await pool.getConnection();
   try {
     const profileId = req.params.id;
     console.log(`🗑️ Deleting profile ${profileId}`);
+    await conn.query("SET FOREIGN_KEY_CHECKS=0");
+    await conn.beginTransaction();
+
     try {
       let continuationToken = undefined;
       let isTruncated = true;
       while (isTruncated) {
-        const list = await s3.send(new ListObjectsV2Command({
-          Bucket: BUCKET_NAME,
-          Prefix: `avatars/${profileId}`,
-          ContinuationToken: continuationToken
-        }));
+        const list = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: `avatars/${profileId}`, ContinuationToken: continuationToken }));
         if (list.Contents && list.Contents.length > 0) {
           for (const obj of list.Contents) {
             await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: obj.Key }));
@@ -293,21 +284,37 @@ app.delete('/api/profiles/:id', async (req, res) => {
         continuationToken = list.NextContinuationToken;
         if (!isTruncated) break;
       }
-      const [prows] = await pool.query('SELECT photo_url FROM profiles WHERE id=?', [profileId]);
+      const [prows] = await conn.query('SELECT photo_url FROM profiles WHERE id=?', [profileId]);
       const pUrl = prows[0]?.photo_url || '';
       if (pUrl.includes('/api/files/')) {
         const k = decodeURIComponent(pUrl.split('/api/files/')[1]);
-        if (k) {
-          await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: k })).catch(()=>{});
-        }
+        if (k) await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: k })).catch(()=>{});
       }
     } catch(s3e){ console.log('S3 delete skip:', s3e.message); }
-    await pool.query('UPDATE profiles SET father_id=NULL WHERE father_id=?', [profileId]);
-    await pool.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=?', [profileId]);
-    await pool.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
-    await pool.query('DELETE FROM profiles WHERE id=?', [profileId]);
-    res.json({ success: true });
-  } catch(e){ res.status(500).json({error: e.message}) }
+
+    const [linkedUsers] = await conn.query('SELECT id FROM users WHERE id=? OR shared_profile_id=?', [profileId, profileId]);
+
+    await conn.query('UPDATE profiles SET father_id=NULL WHERE father_id=?', [profileId]);
+    await conn.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=?', [profileId]);
+    await conn.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
+    await conn.query('DELETE FROM profiles WHERE id=?', [profileId]);
+
+    for (const u of linkedUsers) {
+      await conn.query('DELETE FROM users WHERE id=?', [u.id]);
+      // also clean any leftover profiles owned by that deleted user (except already deleted)
+      await conn.query('DELETE FROM profiles WHERE owner_user_id=?', [u.id]);
+      console.log(`🗑️ Also deleted user ${u.id}`);
+    }
+
+    await conn.commit();
+    await conn.query("SET FOREIGN_KEY_CHECKS=1");
+    res.json({ success: true, deletedProfile: profileId, deletedUsers: linkedUsers.map(u=>u.id) });
+  } catch(e){
+    try { await conn.query("SET FOREIGN_KEY_CHECKS=1"); } catch {}
+    try { await conn.rollback(); } catch {}
+    console.error("delete error", e.message);
+    res.status(500).json({error: e.message})
+  } finally { conn.release(); }
 });
 
 app.post('/api/profiles', async (req, res) => {
@@ -338,34 +345,18 @@ app.post('/api/profiles', async (req, res) => {
         const [spRows] = await conn.query(`SELECT related_profile_id FROM profile_relations WHERE owner_profile_id=? AND relation_type='Spouse' LIMIT 1`, [myId]);
         mySpouseId = spRows[0]?.related_profile_id || null;
         if (finalRelation === 'Child') {
-          if (me.gender === 'Male' || me.gender === null) {
-            newFatherId = myId;
-            newMotherId = mySpouseId;
-          } else {
-            newMotherId = myId;
-            newFatherId = mySpouseId;
-          }
-        } else if (finalRelation === 'Sibling') {
-          newFatherId = me.father_id;
-          newMotherId = me.mother_id;
-        }
+          if (me.gender === 'Male' || me.gender === null) { newFatherId = myId; newMotherId = mySpouseId; }
+          else { newMotherId = myId; newFatherId = mySpouseId; }
+        } else if (finalRelation === 'Sibling') { newFatherId = me.father_id; newMotherId = me.mother_id; }
       }
     }
-    await conn.execute(
-      `INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId]
-    );
+    await conn.execute(`INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId]);
     if (me) {
       if (finalRelation === 'Father') {
         await conn.query(`UPDATE profiles SET father_id=? WHERE id=?`, [finalId, myId]);
-        if (me.father_id) {
-          await conn.query(`UPDATE profiles SET father_id=? WHERE father_id=? AND id!=?`, [finalId, me.father_id, finalId]);
-        }
+        if (me.father_id) await conn.query(`UPDATE profiles SET father_id=? WHERE father_id=? AND id!=?`, [finalId, me.father_id, finalId]);
         try {
-          if (me.mother_id) {
-            await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='') AND id!=?`, [finalId, me.mother_id, finalId]);
-          }
+          if (me.mother_id) await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='') AND id!=?`, [finalId, me.mother_id, finalId]);
           if (me.mother_id) {
             const [check] = await conn.query(`SELECT id FROM profile_relations WHERE ((owner_profile_id=? AND related_profile_id=?) OR (owner_profile_id=? AND related_profile_id=?)) AND relation_type='Spouse'`, [finalId, me.mother_id, me.mother_id, finalId]);
             if (check.length === 0) {
@@ -377,13 +368,9 @@ app.post('/api/profiles', async (req, res) => {
         } catch(e) { console.log('father auto-spouse fix skip', e.message); }
       } else if (finalRelation === 'Mother') {
         await conn.query(`UPDATE profiles SET mother_id=? WHERE id=?`, [finalId, myId]);
-        if (me.mother_id) {
-          await conn.query(`UPDATE profiles SET mother_id=? WHERE mother_id=? AND id!=?`, [finalId, me.mother_id, finalId]);
-        }
+        if (me.mother_id) await conn.query(`UPDATE profiles SET mother_id=? WHERE mother_id=? AND id!=?`, [finalId, me.mother_id, finalId]);
         try {
-          if (me.father_id) {
-            await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='') AND id!=?`, [finalId, me.father_id, finalId]);
-          }
+          if (me.father_id) await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='') AND id!=?`, [finalId, me.father_id, finalId]);
           await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='')`, [finalId, myId]);
           if (me.father_id) {
             const [check] = await conn.query(`SELECT id FROM profile_relations WHERE ((owner_profile_id=? AND related_profile_id=?) OR (owner_profile_id=? AND related_profile_id=?)) AND relation_type='Spouse'`, [finalId, me.father_id, me.father_id, finalId]);
@@ -395,33 +382,20 @@ app.post('/api/profiles', async (req, res) => {
           }
         } catch(e) { console.log('mother auto-spouse fix skip', e.message); }
       } else if (finalRelation === 'Spouse') {
-        const groupId = null;
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
         const rel2 = `rel_${Date.now()+1}_${Math.random().toString(36).substr(2,3)}`;
-        await conn.execute(
-          `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`,
-          [rel1, myId, finalId, 'Spouse', groupId, rel2, finalId, myId, 'Spouse', groupId]
-        );
+        await conn.execute(`INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`, [rel1, myId, finalId, 'Spouse', null, rel2, finalId, myId, 'Spouse', null]);
         try {
-          if (me.gender === 'Female') {
-            await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='')`, [finalId, myId]);
-          } else {
-            await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='')`, [finalId, myId]);
-          }
+          if (me.gender === 'Female') await conn.query(`UPDATE profiles SET father_id=? WHERE mother_id=? AND (father_id IS NULL OR father_id='')`, [finalId, myId]);
+          else await conn.query(`UPDATE profiles SET mother_id=? WHERE father_id=? AND (mother_id IS NULL OR mother_id='')`, [finalId, myId]);
         } catch(e) { console.log('spouse->child update skip', e.message); }
       } else if (finalRelation === 'Sibling') {
         const rel1 = `rel_${Date.now()}_${Math.random().toString(36).substr(2,3)}`;
         const rel2 = `rel_${Date.now()+1}_${Math.random().toString(36).substr(2,3)}`;
         try {
-          await conn.execute(
-            `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type) VALUES (?,?,?,?), (?,?,?,?)`,
-            [rel1, myId, finalId, 'Sibling', rel2, finalId, myId, 'Sibling']
-          );
+          await conn.execute(`INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type) VALUES (?,?,?,?), (?,?,?,?)`, [rel1, myId, finalId, 'Sibling', rel2, finalId, myId, 'Sibling']);
         } catch(e) {
-          await conn.execute(
-            `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`,
-            [rel1, myId, finalId, 'Sibling', null, rel2, finalId, myId, 'Sibling', null]
-          );
+          await conn.execute(`INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?), (?,?,?,?,?)`, [rel1, myId, finalId, 'Sibling', null, rel2, finalId, myId, 'Sibling', null]);
         }
       }
     }
@@ -431,9 +405,7 @@ app.post('/api/profiles', async (req, res) => {
     await conn.rollback();
     console.error("POST /api/profiles error:", err.message);
     res.status(500).json({ error: err.message });
-  } finally {
-    conn.release();
-  }
+  } finally { conn.release(); }
 });
 
 app.get('/api/relations', async (req, res) => {
@@ -443,9 +415,7 @@ app.get('/api/relations', async (req, res) => {
     if (!owner_profile_id) return res.json([]);
     const [rows] = await pool.query('SELECT * FROM profile_relations WHERE owner_profile_id =?', [owner_profile_id]);
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/relations', async (req, res) => {
@@ -453,44 +423,25 @@ app.post('/api/relations', async (req, res) => {
   try {
     const { id, owner_profile_id, related_profile_id, relation_type, spouse_group } = req.body;
     const finalId = id || `rel_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
-    if (!owner_profile_id ||!related_profile_id ||!relation_type) {
-      return res.status(400).json({ error: "owner_profile_id, related_profile_id, relation_type required" });
-    }
-    await pool.execute(
-      "INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?)",
-      [finalId, owner_profile_id, related_profile_id, relation_type, spouse_group || null]
-    );
+    if (!owner_profile_id ||!related_profile_id ||!relation_type) return res.status(400).json({ error: "owner_profile_id, related_profile_id, relation_type required" });
+    await pool.execute("INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?)", [finalId, owner_profile_id, related_profile_id, relation_type, spouse_group || null]);
     res.json({ success: true, id: finalId });
-  } catch (err) {
-    console.error("POST /api/relations error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
     const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
-    if (!profileId) {
-      return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
-    }
+    if (!profileId) return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
     const safeName = req.file.originalname.replace(/\s+/g, '-');
     const key = `avatars/${profileId}/${safeName}`;
-    await s3.send(new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype || 'image/jpeg',
-    }));
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'image/jpeg' }));
     const host = `${req.protocol}://${req.get('host')}`;
     const publicUrl = `${host}/api/files/${key}`;
-    if (pool) {
-      await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]);
-    }
+    if (pool) await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]);
     res.json({ success: true, url: publicUrl, key: key, folder: profileId });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/files/*', async (req, res) => {
@@ -500,9 +451,7 @@ app.get('/api/files/*', async (req, res) => {
     res.setHeader('Content-Type', data.ContentType || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
     data.Body.pipe(res);
-  } catch (err) {
-    res.status(404).json({ error: "File not found", details: err.message });
-  }
+  } catch (err) { res.status(404).json({ error: "File not found", details: err.message }); }
 });
 
 const frontendPath = path.join(__dirname, 'dist');
