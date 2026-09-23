@@ -260,55 +260,84 @@ app.put('/api/profiles/:id', async (req, res) => {
   } catch(e){ res.status(500).json({error: e.message}) }
 });
 
-// --- DELETE WITH USER DELETE ---
+// --- DELETE WITH AUTH + KEEP CHILDREN ---
 app.delete('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
   try {
     const profileId = req.params.id;
-    console.log(`🗑️ Deleting profile ${profileId}`);
+    const deleterUserId = req.query.deleterId || req.query.deleter_user_id || req.body?.deleterId;
+    console.log(`🗑️ Delete ${profileId} by ${deleterUserId}`);
     await conn.query("SET FOREIGN_KEY_CHECKS=0");
     await conn.beginTransaction();
 
+    const [pRows] = await conn.query('SELECT * FROM profiles WHERE id=?', [profileId]);
+    const target = pRows[0];
+    if (!target) { await conn.rollback(); await conn.query("SET FOREIGN_KEY_CHECKS=1"); return res.status(404).json({error:"Profile not found"}); }
+
+    let deleterProfileId = deleterUserId;
+    if (deleterUserId) {
+      const [dRows] = await conn.query('SELECT id FROM profiles WHERE id=? OR owner_user_id=? LIMIT 1', [deleterUserId, deleterUserId]);
+      if (dRows[0]) deleterProfileId = dRows[0].id;
+    }
+
+    const isClaimed = target.is_claimed === 1 || target.owner_user_id === target.id;
+    const isOwner = target.owner_user_id === deleterUserId || profileId === deleterUserId;
+
+    // If claimed and deleter is not owner -> only unlink
+    if (!isOwner && isClaimed) {
+      await conn.query('DELETE FROM profile_relations WHERE (owner_profile_id=? AND related_profile_id=?) OR (owner_profile_id=? AND related_profile_id=?)',
+        [deleterProfileId, profileId, profileId, deleterProfileId]);
+      await conn.commit();
+      await conn.query("SET FOREIGN_KEY_CHECKS=1");
+      return res.json({ success: true, mode: 'unlinked', message: 'Removed from your family, account kept, children kept' });
+    }
+
+    // Full delete for owner / unclaimed
     try {
       let continuationToken = undefined;
       let isTruncated = true;
       while (isTruncated) {
         const list = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: `avatars/${profileId}`, ContinuationToken: continuationToken }));
         if (list.Contents && list.Contents.length > 0) {
-          for (const obj of list.Contents) {
-            await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: obj.Key }));
-          }
+          for (const obj of list.Contents) await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: obj.Key }));
         }
         isTruncated = list.IsTruncated || false;
         continuationToken = list.NextContinuationToken;
         if (!isTruncated) break;
       }
-      const [prows] = await conn.query('SELECT photo_url FROM profiles WHERE id=?', [profileId]);
-      const pUrl = prows[0]?.photo_url || '';
+      const pUrl = target.photo_url || '';
       if (pUrl.includes('/api/files/')) {
         const k = decodeURIComponent(pUrl.split('/api/files/')[1]);
         if (k) await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: k })).catch(()=>{});
       }
-    } catch(s3e){ console.log('S3 delete skip:', s3e.message); }
+    } catch(s3e){ console.log('S3 skip', s3e.message); }
 
     const [linkedUsers] = await conn.query('SELECT id FROM users WHERE id=? OR shared_profile_id=?', [profileId, profileId]);
-
-    await conn.query('UPDATE profiles SET father_id=NULL WHERE father_id=?', [profileId]);
-    await conn.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=?', [profileId]);
     await conn.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
+
+    // Keep children related to deleter: only nullify other side
+    if (deleterProfileId) {
+      await conn.query('UPDATE profiles SET father_id=NULL WHERE father_id=? AND mother_id!=? AND mother_id IS NOT NULL', [profileId, deleterProfileId]);
+      await conn.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=? AND father_id!=? AND father_id IS NOT NULL', [profileId, deleterProfileId]);
+      // If child had only this parent, null it (child stays in DB, not deleted)
+      await conn.query('UPDATE profiles SET father_id=NULL WHERE father_id=?', [profileId]);
+      await conn.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=?', [profileId]);
+    } else {
+      await conn.query('UPDATE profiles SET father_id=NULL WHERE father_id=?', [profileId]);
+      await conn.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=?', [profileId]);
+    }
+
     await conn.query('DELETE FROM profiles WHERE id=?', [profileId]);
 
     for (const u of linkedUsers) {
       await conn.query('DELETE FROM users WHERE id=?', [u.id]);
-      // also clean any leftover profiles owned by that deleted user (except already deleted)
       await conn.query('DELETE FROM profiles WHERE owner_user_id=?', [u.id]);
-      console.log(`🗑️ Also deleted user ${u.id}`);
     }
 
     await conn.commit();
     await conn.query("SET FOREIGN_KEY_CHECKS=1");
-    res.json({ success: true, deletedProfile: profileId, deletedUsers: linkedUsers.map(u=>u.id) });
+    res.json({ success: true, mode: 'deleted', deletedProfile: profileId });
   } catch(e){
     try { await conn.query("SET FOREIGN_KEY_CHECKS=1"); } catch {}
     try { await conn.rollback(); } catch {}

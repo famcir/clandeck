@@ -13,6 +13,7 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [viewProfile, setViewProfile] = useState(null);
   const [displayProfile, setDisplayProfile] = useState(null);
   const [isViewingOther, setIsViewingOther] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // helper to load family-tree using new backend (father_id/mother_id)
   const loadTree = async (profileId, shouldUpdateDisplay = false) => {
@@ -117,7 +118,40 @@ export default function Deck({ onGoProfile, onLogout }) {
     } catch(e) { alert('Share failed: ' + e.message); } setSharing(false);
   };
 
+  const handleDelete = async () => {
+    if(!selected || deleting) return;
+    const isClaimed = selected.is_claimed === 1 || selected.is_claimed === true || selected.owner_user_id === selected.id;
+    const isOwner = selected.owner_user_id === currentUserId || selected.id === currentUserId;
+    const actionText =!isOwner && isClaimed? 'remove from your family' : 'permanently delete';
+    if(!confirm(`Are you sure you want to ${actionText} ${selected.display_name}? ${!isOwner && isClaimed? 'Their account and children will be kept.' : ''}`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/profiles/${selected.id}?deleterId=${currentUserId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if(!res.ok) throw new Error(data.error || 'Delete failed');
+      if(data.mode === 'unlinked') {
+        alert(`${selected.display_name} removed from your family. Their account is kept and children related to you are kept.`);
+      } else {
+        alert(`${selected.display_name} deleted permanently.`);
+      }
+      setSelected(null);
+      // reload current tree
+      const reloadId = viewUserId === selected.id? currentUserId : viewUserId;
+      if(reloadId === currentUserId) {
+        if(loggedProfile?.id) loadTree(loggedProfile.id, false);
+        else {
+          fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(d=>{ setTreeProfiles(d||[]); });
+        }
+      } else {
+        loadTree(reloadId, false);
+      }
+    } catch(e) { alert('Delete failed: ' + e.message); }
+    setDeleting(false);
+  };
+
   const isClaimedSelected = selected && (selected.id === selected.owner_user_id || selected.is_claimed === 1 || selected.is_claimed === true);
+  const isOwnerSelected = selected && (selected.owner_user_id === currentUserId || selected.id === currentUserId);
+  const canFullyDelete =!isClaimedSelected || isOwnerSelected;
 
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{ fontFamily: 'Plus Jakarta Sans' }}>
@@ -196,7 +230,7 @@ export default function Deck({ onGoProfile, onLogout }) {
           <div className="bg-white rounded-[24px] w-full max-w-[340px] p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start mb-4"><h3 className="font-extrabold text-[16px]">{selected.display_name}</h3><button onClick={() => setSelected(null)} className="w-8 h-8 bg-gray-100 rounded-full">✕</button></div>
             {selected.photo_url? <img src={selected.photo_url} className="w-24 h-24 rounded-[18px] object-cover mx-auto" alt="" /> : <div className="w-24 h-24 rounded-[18px] bg-[#c9ad83] text-white flex items-center justify-center text-[28px] font-extrabold mx-auto">{(selected.display_name?.[0] || '?').toUpperCase()}</div>}
-            <p className="text-center text-[10px] text-gray-500 mt-2">{selected.computed_relation || selected.relation_label}</p>
+            <p className="text-center text-[10px] text-gray-500 mt-2">{selected.computed_relation || selected.relation_label} {isClaimedSelected? '• Claimed' : '• Unclaimed'}</p>
             <div className="flex gap-2 mt-5">
               <button onClick={handleViewProfile} className="flex-1 h-9 bg-blue-600 text-white rounded-full font-bold text-[10px]">View Profile</button>
               <button onClick={handleViewTree} className="flex-1 h-9 bg-black text-white rounded-full font-bold text-[10px]">View Tree</button>
@@ -204,6 +238,13 @@ export default function Deck({ onGoProfile, onLogout }) {
                 <button onClick={handleShare} disabled={sharing} className="flex-1 h-9 bg-[#f8f5f0] border border-black rounded-full font-bold text-[10px]">{sharing? '...' : 'Share'}</button>
               )}
             </div>
+            {/* DELETE / REMOVE */}
+            {selected.id!== currentUserId && selected.id!== loggedProfile?.id && (
+              <button onClick={handleDelete} disabled={deleting} className={`w-full mt-3 h-9 rounded-full font-bold text-[10px] ${canFullyDelete? 'bg-red-600 text-white' : 'bg-orange-100 border border-orange-300 text-orange-700'}`}>
+                {deleting? '...' : canFullyDelete? 'Delete Permanently' : 'Remove from my family'}
+              </button>
+            )}
+            {!canFullyDelete && <p className="text-[9px] text-center text-gray-400 mt-2">Claimed accounts can't be deleted, only removed. Their children related to you will be kept.</p>}
           </div>
         </div>
       )}
