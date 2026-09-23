@@ -99,7 +99,7 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "DB Error: " + err.message }); }
 });
 
-// --- CLAIM ACCOUNT: id = shared_profile_id, is_temp=0, profile owner_user_id=id, is_claimed=1 ---
+// --- CLAIM ACCOUNT FIXED: FK CHECK DISABLE ---
 app.post('/api/claim-account', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { userId, newUname, newPassword } = req.body;
@@ -107,12 +107,15 @@ app.post('/api/claim-account', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    await conn.query("SET FOREIGN_KEY_CHECKS=0");
+
     const [rows] = await conn.query("SELECT id, shared_profile_id FROM users WHERE id=?", [userId]);
     if (rows.length===0) throw new Error("User not found");
     const user = rows[0];
     const sharedProfileId = user.shared_profile_id;
     if (!sharedProfileId) throw new Error("No shared_profile_id to claim");
     if (user.id === sharedProfileId) {
+      await conn.query("SET FOREIGN_KEY_CHECKS=1");
       await conn.rollback();
       return res.json({success: true, id: user.id, message: "Already claimed"});
     }
@@ -121,14 +124,18 @@ app.post('/api/claim-account', async (req, res) => {
     const [unameCheck] = await conn.query("SELECT id FROM users WHERE uname=? AND id!=?", [newUname, userId]);
     if (unameCheck.length>0) throw new Error("Username already taken");
 
+    // 1. Update users id first
+    await conn.query("UPDATE users SET id=?, uname=?, email=?, password=?, is_temp=0, shared_profile_id=NULL WHERE id=?", [newId, newUname, newUname, newPassword, userId]);
+
+    // 2. Now update profiles owner
     await conn.query("UPDATE profiles SET owner_user_id=?, is_claimed=1 WHERE id=?", [newId, sharedProfileId]);
     await conn.query("UPDATE profiles SET owner_user_id=? WHERE owner_user_id=?", [newId, userId]);
 
-    await conn.query("UPDATE users SET id=?, uname=?, email=?, password=?, is_temp=0, shared_profile_id=NULL WHERE id=?", [newId, newUname, newUname, newPassword, userId]);
-
+    await conn.query("SET FOREIGN_KEY_CHECKS=1");
     await conn.commit();
     res.json({success: true, id: newId, uname: newUname});
   } catch(e){
+    try { await conn.query("SET FOREIGN_KEY_CHECKS=1"); } catch {}
     await conn.rollback();
     console.error("claim error", e.message);
     res.status(500).json({error: e.message});
