@@ -23,6 +23,9 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   // NEW: viewing other member tree
   const [viewProfileId, setViewProfileId] = useState(null);
   const [viewProfileData, setViewProfileData] = useState(null);
+  // FIX: need tree + relations for viewed member
+  const [activeTree, setActiveTree] = useState(null);
+  const [activeRelations, setActiveRelations] = useState([]);
 
   const [editForm, setEditForm] = useState({
     display_name: '',
@@ -220,36 +223,55 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     setShowAddmodel(true);
   };
 
-  // NEW: click on family photo -> show that member's tree
-  const handleMemberPhotoClick = (member) => {
+  // FIXED: click on family photo -> show that member's FULL tree
+  const handleMemberPhotoClick = async (member) => {
     if(member.id === self?.id) {
       handleBackToMyTree();
       return;
     }
     setViewProfileId(member.id);
     setViewProfileData(member);
+    try {
+      const res = await fetch(`/api/family-tree/${member.id}`);
+      const data = await res.json();
+      if(Array.isArray(data) && data.length > 0) setActiveTree(data);
+      else setActiveTree(null);
+      const relRes = await fetch(`/api/relations?owner_profile_id=${member.id}`);
+      const relData = await relRes.json();
+      setActiveRelations(relData || []);
+    } catch(e) {
+      console.log('load active tree failed', e);
+      setActiveTree(null);
+      setActiveRelations([]);
+    }
   };
 
   const handleBackToMyTree = () => {
     setViewProfileId(null);
     setViewProfileData(null);
+    setActiveTree(null);
+    setActiveRelations([]);
   };
 
   const goDeck = () => { if (onDeck) onDeck(); else if (onBack) onBack(); };
   if (!self) return <div className="p-10">Loading {currentUserId}...</div>;
 
-  const father = profiles.find(p => p.id === activeSelf?.father_id);
-  const mother = profiles.find(p => p.id === activeSelf?.mother_id);
-  const spouseIds = relations.filter(r => r.relation_type === 'Spouse').map(r => r.related_profile_id);
-  const spouse = profiles.find(p => spouseIds.includes(p.id));
-  const spouseList = profiles.filter(p => spouseIds.includes(p.id));
-  const siblingsFixed = profiles.filter(p => {
+  // FIXED: use activeTree / activeRelations when viewing other
+  const sourceProfiles = activeTree || profiles;
+  const sourceRelations = isViewingOther? activeRelations : relations;
+
+  const father = sourceProfiles.find(p => p.id === activeSelf?.father_id);
+  const mother = sourceProfiles.find(p => p.id === activeSelf?.mother_id);
+  const spouseIds = sourceRelations.filter(r => r.relation_type === 'Spouse').map(r => r.related_profile_id);
+  const spouse = sourceProfiles.find(p => spouseIds.includes(p.id));
+  const spouseList = sourceProfiles.filter(p => spouseIds.includes(p.id));
+  const siblingsFixed = sourceProfiles.filter(p => {
     if (p.id === activeSelf?.id) return false;
     if (activeSelf?.father_id && p.father_id === activeSelf?.father_id) return true;
     if (activeSelf?.mother_id && p.mother_id === activeSelf?.mother_id) return true;
     return false;
   });
-  const children = profiles.filter(p => p.father_id === activeSelf?.id || p.mother_id === activeSelf?.id);
+  const children = sourceProfiles.filter(p => p.father_id === activeSelf?.id || p.mother_id === activeSelf?.id);
 
   const Node = ({ p, big }) => {
     if (!p) return null;
@@ -389,9 +411,9 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-extrabold text-[16px]">
                 {editingFamilyId
-                 ? 'Edit Family Member'
+                ? 'Edit Family Member'
                   : isViewingOther
-                   ? `Add ${activeSelf?.display_name}'s Family Member`
+                  ? `Add ${activeSelf?.display_name}'s Family Member`
                     : 'Add Family Member'}
               </h3>
               <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); }} className="w-8 h-8 bg-gray-100 rounded-full">✕</button>
@@ -399,7 +421,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="space-y-3">
               <p className="text-[11px] text-gray-500">
                 {isViewingOther &&!editingFamilyId
-                 ? `Adding to ${activeSelf?.display_name}'s family tree`
+                ? `Adding to ${activeSelf?.display_name}'s family tree`
                   : "Add a new member to family tree"}
               </p>
               <select value={newRelation} onChange={e=>setNewRelation(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px] font-bold">
