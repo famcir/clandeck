@@ -29,18 +29,18 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
   useEffect(() => {
     fetch(`/api/profiles?owner_user_id=${currentUserId}`)
-  .then(res => res.json())
-  .then(data => setProfiles(data || []))
-  .catch(() => setProfiles([]));
+.then(res => res.json())
+.then(data => setProfiles(data || []))
+.catch(() => setProfiles([]));
   }, [currentUserId]);
 
   const selfForRel = profiles.find(p => p.id === currentUserId) || profiles.find(p => p.relation_label?.toLowerCase() === 'self') || profiles[0];
   useEffect(() => {
     if (!selfForRel?.id) return;
     fetch(`/api/relations?owner_profile_id=${selfForRel.id}`)
-   .then(r => r.json())
-   .then(d => setRelations(d || []))
-   .catch(() => setRelations([]));
+ .then(r => r.json())
+ .then(d => setRelations(d || []))
+ .catch(() => setRelations([]));
   }, [selfForRel?.id, profiles.length]);
 
   const self = profiles.find(p => p.id === currentUserId)
@@ -117,7 +117,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
   const handleAddFamily = async () => {
     if(!newName) return alert('Enter name');
-
     if(editingFamilyId){
       setAdding(true);
       try{
@@ -141,23 +140,19 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
       }catch(e){ alert('Failed: '+e.message); }finally{ setAdding(false); }
       return;
     }
-
     if (['Father','Mother'].includes(newRelation)) {
       if (newRelation === 'Father' && self?.father_id) return alert(`Father already exists!`);
       if (newRelation === 'Mother' && self?.mother_id) return alert(`Mother already exists!`);
     }
-
     setAdding(true);
     try {
       const genderForNew = newRelation === 'Father'? 'Male' : newRelation === 'Mother'? 'Female' : newRelation === 'Spouse'? (self?.gender === 'Male'? 'Female' : 'Male') : null;
-
       const spouseList = profiles.filter(p => relations.filter(r => r.relation_type === 'Spouse').map(r=>r.related_profile_id).includes(p.id));
       let linkedSpouseId = null;
       if (newRelation === 'Child') {
         if (spouseList.length === 1) linkedSpouseId = spouseList[0].id;
         else if (spouseList.length > 1) linkedSpouseId = selectedSpouseForChild || spouseList[0].id;
       }
-
       const res1 = await fetch('/api/profiles', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
@@ -176,7 +171,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
       const data1 = await res1.json();
       if (!res1.ok) throw new Error(data1.error || 'Add failed');
       const profileId = data1.id;
-
       let photoUrl = '';
       if(newPhoto){
         const fd = new FormData(); fd.append('file', newPhoto);
@@ -185,7 +179,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         photoUrl = upData.url || '';
         await fetch(`/api/profiles/${profileId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ photo_url: photoUrl }) });
       }
-
       const refreshed = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json());
       setProfiles(refreshed || []);
       const relRef = await fetch(`/api/relations?owner_profile_id=${self.id}`).then(r=>r.json());
@@ -260,13 +253,12 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{ fontFamily: 'Plus Jakarta Sans' }}>
       <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');
-   .card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}
+ .card{background:#fffefb;border:1px solid #e9e2d6;border-radius:28px}
       input,textarea{outline:none}
-   .tree-node{ width: clamp(44px, 8.5cqw, 62px); height: clamp(44px, 8.5cqw, 62px); font-size: clamp(16px, 3.5cqw, 22px); }
-   .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
-   .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
+ .tree-node{ width: clamp(44px, 8.5cqw, 62px); height: clamp(44px, 8.5cqw, 62px); font-size: clamp(16px, 3.5cqw, 22px); }
+ .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
+ .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
       `}</style>
-
       <header className="h-[68px] bg-[#fffefb] border-b flex items-center px-6 justify-between">
         <div className="flex items-center gap-3">
           <img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />
@@ -277,7 +269,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
           {self?.photo_url? <img src={self.photo_url} className="w-9 h-9 rounded-full object-cover" alt="" /> : <div className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
         </div>
       </header>
-
       <div className="grid grid-cols-12 gap-4 p-4 w-full">
         <div className="col-span-12 lg:col-span-3 card p-6">
           <div className="text-center">
@@ -288,7 +279,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
               </div>
             </div>
             <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
-
             {!isEditing? (
               <>
                 <h2 className="font-extrabold text-[18px] mt-3">{self.display_name}</h2>
@@ -299,7 +289,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             )}
             {uploading && <p className="text-[10px] text-blue-600 mt-1">Uploading...</p>}
           </div>
-
           {!isEditing? (
             <>
               <div className="mt-6 flex gap-2">
@@ -325,13 +314,11 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             </div>
           )}
         </div>
-
         <div className="col-span-12 lg:col-span-6 card p-6">
           <div className="flex justify-between items-center mb-4">
             <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">+ Add Family Member</button>
             <span className="text-[11px] text-gray-500">{profiles.length} members</span>
           </div>
-
           <div className="w-full flex justify-center">
             <div className="relative w-full overflow-hidden" style={{ maxWidth: '520px', height: 'clamp(360px, 40vw, 440px)', containerType: 'inline-size' }}>
               <div className="absolute left-1/2 -translate-x-1/2 top-[2%] flex gap-[2px] z-10">
@@ -351,14 +338,12 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             </div>
           </div>
         </div>
-
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <div className="card p-4"><h3 className="font-bold text-[13px]">Notifications</h3><p className="text-[12px] mt-2">✅ Profile loaded for {currentUserId}</p></div>
           <div className="card p-4"><h3 className="font-bold text-[13px]">Pictures</h3><div className="grid grid-cols-3 gap-2 mt-2"><div className="aspect-square bg-[#f2efe8] rounded-xl"></div><div className="aspect-square bg-[#f2efe8] rounded-xl"></div><div className="aspect-square bg-[#f2efe8] rounded-xl"></div></div></div>
           <div className="card p-4"><h3 className="font-bold text-[13px]">Baskets</h3><p className="text-[12px] mt-2">🧺 {profiles.length} members</p></div>
         </div>
       </div>
-
       {showAddmodel && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[20px] w-full max-w-[380px] p-6">
