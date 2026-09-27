@@ -13,6 +13,9 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [viewProfile, setViewProfile] = useState(null);
   const [displayProfile, setDisplayProfile] = useState(null);
   const [isViewingOther, setIsViewingOther] = useState(false);
+  // NEW: depth level for + / -
+  const [treeDepth, setTreeDepth] = useState(1);
+  const [extendedTree, setExtendedTree] = useState([]);
 
   const loadTree = async (profileId, shouldUpdateDisplay = false) => {
     try {
@@ -43,6 +46,26 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   useEffect(()=>{ if(viewUserId===currentUserId) return; if(viewUserId) loadTree(viewUserId,false); },[viewUserId]);
 
+  // NEW: load second level when + pressed
+  useEffect(()=>{
+    if(treeDepth === 1){
+      setExtendedTree([]);
+      return;
+    }
+    const base = treeProfiles;
+    if(base.length === 0) return;
+    // second level = family members of current family members (siblings + children)
+    const ids = [...new Set([...base.filter(p=>['Sibling','Child'].includes(p.computed_relation)).map(p=>p.id)])];
+    if(ids.length===0){ setExtendedTree(base); return; }
+    Promise.all(ids.map(id=> fetch(`/api/family-tree/${id}`).then(r=>r.json()).catch(()=>[])))
+     .then(results=>{
+        const flat = results.flat().filter(Boolean);
+        const merged = [...base,...flat];
+        const unique = Array.from(new Map(merged.map(p=>[p.id,p])).values());
+        setExtendedTree(unique);
+      });
+  },[treeDepth, treeProfiles.length]);
+
   const father = treeProfiles.find(p=>p.computed_relation==='Father' || (treeSelf && p.id===treeSelf.father_id));
   const mother = treeProfiles.find(p=>p.computed_relation==='Mother' || (treeSelf && p.id===treeSelf.mother_id));
   const spouse = treeProfiles.find(p=>p.computed_relation==='Spouse');
@@ -67,7 +90,7 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   const handleViewProfile = () => { if(!selected) return; setDisplayProfile(selected); setViewProfile(selected); setViewUserId(selected.id); setIsViewingOther(selected.id!==currentUserId && selected.id!==loggedProfile?.id); loadTree(selected.id,true); setSelected(null); };
   const handleViewTree = () => { if(!selected) return; setViewProfile(selected); setViewUserId(selected.id); loadTree(selected.id,false); setSelected(null); };
-  const handleBackToMyTree = () => { setViewProfile(null); setViewUserId(currentUserId); setDisplayProfile(loggedProfile); setIsViewingOther(false); if(loggedProfile?.id) loadTree(loggedProfile.id,false); };
+  const handleBackToMyTree = () => { setViewProfile(null); setViewUserId(currentUserId); setDisplayProfile(loggedProfile); setIsViewingOther(false); setTreeDepth(1); if(loggedProfile?.id) loadTree(loggedProfile.id,false); };
   const handleShare = async () => {
     if(!selected || sharing) return; setSharing(true);
     try{
@@ -80,9 +103,13 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   const isClaimedSelected = selected && (selected.id===selected.owner_user_id || selected.is_claimed===1 || selected.is_claimed===true);
 
+  // NEW: what to display based on depth
+  const displayCount = treeDepth === 1? treeProfiles.length : extendedTree.length || treeProfiles.length;
+  const isSecondLevel = treeDepth >= 2;
+
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:clamp(44px,8.5cqw,62px);height:clamp(44px,8.5cqw,62px);}.tree-node-big{width:clamp(58px,11cqw,76px);height:clamp(58px,11cqw,76px);font-size:clamp(20px,4cqw,26px);}.tree-label{font-size:clamp(8px,2cqw,11px);}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:clamp(44px,8.5cqw,62px);height:clamp(44px,8.5cqw,62px);}.tree-node-big{width:clamp(58px,11cqw,76px);height:clamp(58px,11cqw,76px);font-size:clamp(20px,4cqw,26px);}.tree-label{font-size:clamp(8px,2cqw,11px);}.family-scroll{overflow:auto;max-height:500px;max-width:100%;}.family-scroll::-webkit-scrollbar{width:6px;height:6px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px}`}</style>
       <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-6 justify-between sticky top-0 z-20 w-full">
         <div className="flex items-center gap-3"><img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />{isViewingOther && <button onClick={handleBackToMyTree} className="ml-2 px-4 h-8 bg-black text-white rounded-full text-[11px] font-bold">Deck</button>}</div>
         <div className="flex items-center gap-3"><button onClick={onLogout} className="px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Logout</button>{loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" alt="profile" /> : <div onClick={onGoProfile} className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer border-2 border-[#c9ad83]">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}</div>
@@ -95,16 +122,38 @@ export default function Deck({ onGoProfile, onLogout }) {
           <div className="bg-[#efe8d3] border border-[#e9e2d6] border-b-0 rounded-t-[10px] rounded-b-none p-4 flex justify-between items-center">
             <h2 className="font-extrabold text-[15px]">{viewUserId===currentUserId?'My Family Tree':`${treeSelf?.display_name||viewProfile?.display_name||'Member'}'s Tree`}</h2>
             <div className="flex items-center gap-2">
+              {/* NEW + / - BUTTONS */}
+              <div className="flex items-center gap-1 bg-white rounded-full border border-[#e9e2d6] px-1 py-1">
+                <button onClick={()=>setTreeDepth(d=>Math.max(1,d-1))} disabled={treeDepth===1} className="w-6 h-6 rounded-full bg-black text-white text-[14px] font-bold flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed">−</button>
+                <span className="text-[10px] font-bold px-1">L{treeDepth}</span>
+                <button onClick={()=>setTreeDepth(d=>Math.min(3,d+1))} disabled={treeDepth===3} className="w-6 h-6 rounded-full bg-black text-white text-[14px] font-bold flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed">+</button>
+              </div>
               {viewUserId!==currentUserId && <button onClick={handleBackToMyTree} className="px-3 h-7 bg-black text-white rounded-full text-[10px] font-bold">← Back</button>}
-              <span className="text-[11px] bg-white px-3 py-1 rounded-full font-bold border border-[#e9e2d6]">{treeProfiles.length} Members</span>
+              <span className="text-[11px] bg-white px-3 py-1 rounded-full font-bold border border-[#e9e2d6]">{displayCount} Members</span>
             </div>
           </div>
-          <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] rounded-t-none p-6 w-full">
-            {treeProfiles.length<=1 && treeSelf? (
-              <div className="h-[440px] flex flex-col items-center justify-center"><div className="w-[90px] h-[90px] bg-[#c9ad83] text-white text-[28px] rounded-[8px] flex items-center justify-center overflow-hidden border shadow-sm">{treeSelf.photo_url? <img src={treeSelf.photo_url} className="w-full h-full object-cover" alt="" /> : <span className="font-extrabold">{(treeSelf.display_name?.[0]||'?').toUpperCase()}</span>}</div><p className="font-extrabold mt-3 text-[16px]">{treeSelf.display_name}</p><p className="text-[11px] text-gray-500">{treeSelf.computed_relation||'Self'}</p></div>
-            ):(
-              <div className="w-full flex justify-center"><div className="relative w-full overflow-hidden" style={{maxWidth:'520px',height:'clamp(360px,40vw,440px)',containerType:'inline-size'}}><div className="absolute left-1/2 -translate-x-1/2 top-[2%] flex gap-[2px] z-10">{father && <Node p={father} />}{mother && <Node p={mother} />}</div><div className="absolute left-1/2 -translate-x-1/2 top-[38%] flex items-center gap-[12px]">{spouse && <Node p={spouse} />}<Node p={treeSelf} big /></div><div className="absolute right-[4%] top-[18%] flex gap-[2px] max-w-[36%] flex-wrap justify-end">{siblings.map(s=><Node key={s.id} p={s} />)}</div><div className="absolute left-[47%] bottom-[5%] -translate-x-1/2 flex gap-[2px] justify-center">{children.map(c=><Node key={c.id} p={c} />)}</div></div></div>
-            )}
+          <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] rounded-t-none p-0 w-full">
+            {/* NEW: scroll container with both bars */}
+            <div className="family-scroll p-6">
+              {treeDepth === 1? (
+                treeProfiles.length<=1 && treeSelf? (
+                  <div className="h-[440px] flex flex-col items-center justify-center"><div className="w-[90px] h-[90px] bg-[#c9ad83] text-white text-[28px] rounded-[8px] flex items-center justify-center overflow-hidden border shadow-sm">{treeSelf.photo_url? <img src={treeSelf.photo_url} className="w-full h-full object-cover" alt="" /> : <span className="font-extrabold">{(treeSelf.display_name?.[0]||'?').toUpperCase()}</span>}</div><p className="font-extrabold mt-3 text-[16px]">{treeSelf.display_name}</p><p className="text-[11px] text-gray-500">{treeSelf.computed_relation||'Self'}</p></div>
+                ):(
+                  <div className="w-full flex justify-center"><div className="relative w-full" style={{minWidth:'520px',height:'clamp(360px,40vw,440px)',containerType:'inline-size'}}><div className="absolute left-1/2 -translate-x-1/2 top-[2%] flex gap-[2px] z-10">{father && <Node p={father} />}{mother && <Node p={mother} />}</div><div className="absolute left-1/2 -translate-x-1/2 top-[38%] flex items-center gap-[12px]">{spouse && <Node p={spouse} />}<Node p={treeSelf} big /></div><div className="absolute right-[4%] top-[18%] flex gap-[2px] max-w-[36%] flex-wrap justify-end">{siblings.map(s=><Node key={s.id} p={s} />)}</div><div className="absolute left-[47%] bottom-[5%] -translate-x-1/2 flex gap-[2px] justify-center">{children.map(c=><Node key={c.id} p={c} />)}</div></div></div>
+                )
+              ) : (
+                /* LEVEL 2 & 3 : second level family members */
+                <div className="w-full" style={{minWidth:'700px'}}>
+                  <p className="text-[10px] text-gray-500 mb-3">Level {treeDepth} - {treeDepth===2? 'Extended family (siblings & children families)' : 'Full 3-generation tree (incl. in-laws parents like Janardhanan/Sarojani)'} </p>
+                  <div className="flex flex-wrap gap-4 justify-start">
+                    {(extendedTree.length>0?extendedTree:treeProfiles).map(p=>(
+                      <Node key={p.id} p={p} />
+                    ))}
+                  </div>
+                  {extendedTree.length===0 && <p className="text-[11px] text-gray-400 mt-4">No extended members found — add more relations in profile</p>}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
