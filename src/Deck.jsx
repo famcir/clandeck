@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import logo from './assets/clandeck_h.png';
+import mangoBasket from './assets/mango-basket.png';
 
 export default function Deck({ onGoProfile, onLogout }) {
   const currentUserId = localStorage.getItem('userId') || 'ur001';
@@ -153,23 +154,28 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:scroll!important;display:block;position:relative;background:#fffefb}.family-scroll::-webkit-scrollbar{width:12px;height:12px;display:block}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:block;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}`}</style>
       <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-6 justify-between sticky top-0 z-20 w-full">
         <div className="flex items-center gap-3"><img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />{isViewingOther && <button onClick={handleBackToMyTree} className="ml-2 px-4 h-8 bg-black text-white rounded-full text-[11px] font-bold">Deck</button>}</div>
-        <div className="flex items-center gap-3"><button onClick={onLogout} className="px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Logout</button>{loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" alt="profile" /> : <div onClick={onGoProfile} className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer border-2 border-[#c9ad83]">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}</div>
+        <div className="flex items-center gap-3"><button onClick={onLogout} className="px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Logout</button>{loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}</div>
       </header>
       <div className="p-4 grid grid-cols-12 gap-4 w-full">
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <div className="card p-6 text-center">
-            {(displayProfile?.photo_url||loggedProfile?.photo_url)? <img src={displayProfile?.photo_url||loggedProfile?.photo_url} className="w-[110px] h-[110px] rounded-[8px] mx-auto object-cover border" alt="" /> : <div className="w-[110px] h-[110px] rounded-[8px] mx-auto bg-[#c9ad83] text-white flex items-center justify-center text-[36px] font-extrabold border">{((displayProfile?.display_name||loggedProfile?.display_name||'?')[0]||'?').toUpperCase()}</div>}
+            {(displayProfile?.photo_url||loggedProfile?.photo_url)? <img src={displayProfile?.photo_url||loggedProfile?.photo_url} title="Click to edit profile" onClick={onGoProfile} className="w-[110px] h-[110px] rounded-[8px] mx-auto object-cover border cursor-pointer hover:opacity-80 transition-opacity" alt="" /> : <div title="Click to edit profile" onClick={onGoProfile} className="w-[110px] h-[110px] rounded-[8px] mx-auto bg-[#c9ad83] text-white flex items-center justify-center text-[36px] font-extrabold border cursor-pointer hover:opacity-80 transition-opacity">{((displayProfile?.display_name||loggedProfile?.display_name||'?')[0]||'?').toUpperCase()}</div>}
             <h2 className="font-extrabold text-[18px] mt-3">{displayProfile?.display_name||loggedProfile?.display_name||'Loading...'}</h2>
-            <p className="text-[11px] text-[#5a4a32] bg-[#efe8d3] px-2 py-1 rounded-full inline-block mt-1 font-bold">Mangos in your basket - {mangoCount}</p>
-            <div className="flex gap-2 mt-4">
-              <button onClick={onGoProfile} className="flex-1 py-2.5 bg-[#efe8d3] border border-[#e9e2d6] text-[#5a4a32] rounded-[10px] font-bold text-[12px] hover:bg-[#e8dcc0] transition-colors">View Full Profile</button>
-              {canShowShare && (
-                <button onClick={handleShareCurrent} disabled={sharing} className="flex-1 py-2.5 bg-[#f8f5f0] border border-[#e9e2d6] text-[#5a4a32] rounded-[10px] font-bold text-[12px] hover:bg-black hover:text-white hover:border-black transition-colors">{sharing?'Sharing...':'Share'}</button>
-              )}
+            <div className="relative inline-block mt-2">
+              <img src={mangoBasket} alt="Mango basket" className="w-[90px] h-[90px] object-contain mx-auto" />
+              <span className="absolute -top-1 -right-1 bg-[#c9ad83] text-white text-[13px] font-extrabold w-7 h-7 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                {mangoCount}
+              </span>
             </div>
+            <p className="text-[9px] text-gray-400 mt-1 font-bold tracking-widest">MANGOS IN BASKET</p>
+            {canShowShare && (
+              <div className="flex gap-2 mt-4">
+                <button onClick={handleShareCurrent} disabled={sharing} className="w-full py-2.5 bg-[#f8f5f0] border border-[#e9e2d6] text-[#5a4a32] rounded-[10px] font-bold text-[12px] hover:bg-black hover:text-white hover:border-black transition-colors">{sharing?'Sharing...':'Share'}</button>
+              </div>
+            )}
           </div>
         </div>
         <div className="col-span-12 lg:col-span-6 flex flex-col gap-0">
@@ -187,48 +193,48 @@ export default function Deck({ onGoProfile, onLogout }) {
           <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] rounded-t-none p-0 w-full overflow-hidden">
             <div className="family-scroll">
               {treeDepth===0? (
-                <div className="relative" style={{width:'900px',height:'750px',minWidth:'900px',minHeight:'750px'}}>
+                <div className="relative" style={{width:`${Math.max(1100, 600 + siblings.length * 110)}px`,height:'520px',minWidth:'900px'}}>
                   <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2}}>
-                    {father && mother && <line x1="384" y1="212" x2="416" y2="212" stroke="#c9ad83" strokeWidth="1.5"/>}
-                    {(father || mother) && <line x1="400" y1="212" x2="400" y2="312" stroke="#c9ad83" strokeWidth="1.5"/>}
-                    {treeSelf && spouse && <line x1="438" y1="352" x2="470" y2="352" stroke="#c9ad83" strokeWidth="1.5"/>}
+                    {father && mother && <line x1="584" y1="212" x2="616" y2="212" stroke="#c9ad83" strokeWidth="1.5"/>}
+                    {(father || mother) && <line x1="600" y1="212" x2="600" y2="312" stroke="#c9ad83" strokeWidth="1.5"/>}
+                    {treeSelf && spouse && <line x1="638" y1="352" x2="670" y2="352" stroke="#c9ad83" strokeWidth="1.5"/>}
                     {treeSelf && spouse && children.length>0 && (
                       <>
-                        <line x1="454" y1="352" x2="454" y2="434" stroke="#c9ad83" strokeWidth="1.5"/>
-                        {children.length>1 && <line x1="454" y1="434" x2={454 + (children.length-1)*80} y2="434" stroke="#c9ad83" strokeWidth="1.2"/>}
-                        {children.map((_,i)=> <line key={`c-${i}`} x1={454 + i*80} y1="434" x2={454 + i*80} y2="444" stroke="#c9ad83" strokeWidth="1.2"/>)}
+                        <line x1="654" y1="352" x2="654" y2="434" stroke="#c9ad83" strokeWidth="1.5"/>
+                        {children.length>1 && <line x1="654" y1="434" x2={654 + (children.length-1)*80} y2="434" stroke="#c9ad83" strokeWidth="1.2"/>}
+                        {children.map((_,i)=> <line key={`c-${i}`} x1={654 + i*80} y1="434" x2={654 + i*80} y2="444" stroke="#c9ad83" strokeWidth="1.2"/>)}
                       </>
                     )}
                     {siblings.length>1 && (
                       <>
-                        <line x1={272} y1="236" x2={272 - (siblings.length-1)*100} y2="236" stroke="#c9ad83" strokeWidth="1.2"/>
-                        {siblings.map((_,i)=> <line key={`s-${i}`} x1={272 - i*100} y1="236" x2={272 - i*100} y2="246" stroke="#c9ad83" strokeWidth="1.2"/>)}
+                        <line x1="472" y1="236" x2={472 - (siblings.length-1)*100} y2="236" stroke="#c9ad83" strokeWidth="1.2"/>
+                        {siblings.map((_,i)=> <line key={`s-${i}`} x1={472 - i*100} y1="236" x2={472 - i*100} y2="246" stroke="#c9ad83" strokeWidth="1.2"/>)}
                       </>
                     )}
                     {siblings.length>0 && (
                       <>
-                        <line x1="400" y1="285" x2="304" y2="285" stroke="#c9ad83" strokeWidth="1.5"/>
-                        <line x1="304" y1="278" x2="304" y2="285" stroke="#c9ad83" strokeWidth="1.5"/>
+                        <line x1="600" y1="285" x2="504" y2="285" stroke="#c9ad83" strokeWidth="1.5"/>
+                        <line x1="504" y1="278" x2="504" y2="285" stroke="#c9ad83" strokeWidth="1.5"/>
                       </>
                     )}
                   </svg>
-                  {father && mother && <div className="absolute" style={{left:'393px',top:'190px',zIndex:3,fontSize:'10px'}}>❤️</div>}
-                  {treeSelf && spouse && <div className="absolute" style={{left:'447px',top:'330px',zIndex:3,fontSize:'10px'}}>❤️</div>}
-                  <div className="absolute" style={{left:'320px',top:'180px'}}>{father && <Node p={father} />}</div>
-                  <div className="absolute" style={{left:'416px',top:'180px'}}>{mother && <Node p={mother} />}</div>
+                  {father && mother && <div className="absolute" style={{left:'593px',top:'190px',zIndex:3,fontSize:'10px'}}>❤️</div>}
+                  {treeSelf && spouse && <div className="absolute" style={{left:'647px',top:'330px',zIndex:3,fontSize:'10px'}}>❤️</div>}
+                  <div className="absolute" style={{left:'520px',top:'180px'}}>{father && <Node p={father} />}</div>
+                  <div className="absolute" style={{left:'616px',top:'180px'}}>{mother && <Node p={mother} />}</div>
                   {siblings.map((s, idx) => (
-                    <div key={s.id} className="absolute" style={{left:`${240 - idx*100}px`, top:'246px'}}>
+                    <div key={s.id} className="absolute" style={{left:`${440 - idx*100}px`, top:'246px'}}>
                       <Node p={s} />
                     </div>
                   ))}
-                  <div className="absolute" style={{left:'362px',top:'312px',zIndex:3}}><Node p={treeSelf} big /></div>
-                  <div className="absolute" style={{left:'470px',top:'320px'}}>{spouse && <Node p={spouse} />}</div>
-                  <div className="absolute flex gap-4" style={{left: spouse? '454px' : '400px', top:'444px', transform:'translateX(-32px)', maxWidth:'600px', flexWrap:'wrap'}}>
+                  <div className="absolute" style={{left:'562px',top:'312px',zIndex:3}}><Node p={treeSelf} big /></div>
+                  <div className="absolute" style={{left:'670px',top:'320px'}}>{spouse && <Node p={spouse} />}</div>
+                  <div className="absolute flex gap-4" style={{left: spouse? '654px' : '600px', top:'444px', flexWrap:'nowrap', maxWidth:'none'}}>
                     {children.map(c=> <Node key={c.id} p={c} />)}
                   </div>
                 </div>
               ) : treeDepth===1? (
-                <div className="relative" style={{width:'1200px',height:'700px',minWidth:'1200px',minHeight:'700px'}}>
+                <div className="relative" style={{width:'1200px',height:'520px',minWidth:'1200px'}}>
                   <div className="absolute flex gap-6" style={{left:'20px',top:'10px',flexWrap:'wrap',maxWidth:'1100px'}}>
                     {allProfiles.filter(p=>p.computed_relation==='Father').map(p=><Node key={p.id} p={p} />)}
                   </div>
@@ -240,7 +246,7 @@ export default function Deck({ onGoProfile, onLogout }) {
                   </div>
                 </div>
               ) : (
-                <div style={{width:'1200px',minWidth:'1200px',minHeight:'700px',padding:'20px'}}>
+                <div style={{width:'1200px',minWidth:'1200px',minHeight:'540px',padding:'20px'}}>
                   <p className="text-[10px] text-gray-500 mb-3">Level 2 - Full joined tree ({allProfiles.length} members)</p>
                   <div className="flex flex-wrap gap-5">
                     {allProfiles.map(p=><Node key={p.id} p={p} />)}
