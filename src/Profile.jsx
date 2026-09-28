@@ -20,10 +20,12 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const [adding, setAdding] = useState(false);
   const [editingFamilyId, setEditingFamilyId] = useState(null);
 
-  // NEW: viewing other member tree
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedExistingId, setSelectedExistingId] = useState(null);
+  const [searching, setSearching] = useState(false);
+
   const [viewProfileId, setViewProfileId] = useState(null);
   const [viewProfileData, setViewProfileData] = useState(null);
-  // FIX: need tree + relations for viewed member
   const [activeTree, setActiveTree] = useState(null);
   const [activeRelations, setActiveRelations] = useState([]);
 
@@ -55,7 +57,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             || profiles.find(p => p.relation_label?.toLowerCase() === 'you')
             || profiles[0];
 
-  // Active profile is either viewed member or self
   const activeSelf = viewProfileData || self;
   const isViewingOther =!!viewProfileId;
 
@@ -69,6 +70,23 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
       });
     }
   }, [self?.id]);
+
+  useEffect(() => {
+    if(editingFamilyId) return;
+    const q = newName?.trim() || '';
+    if(q.length < 1){ setSearchResults([]); return; }
+    const timer = setTimeout(async ()=>{
+      setSearching(true);
+      try{
+        const res = await fetch(`/api/profiles?owner_user_id=${currentUserId}&search=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        const filtered = (data||[]).filter(p=> p.id!== activeSelf?.id && p.id!== self?.id);
+        setSearchResults(filtered.slice(0,30));
+      }catch{ setSearchResults([]); }
+      setSearching(false);
+    }, 300);
+    return ()=>clearTimeout(timer);
+  }, [newName, editingFamilyId, activeSelf?.id, self?.id, currentUserId]);
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
@@ -127,7 +145,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   };
 
   const handleAddFamily = async () => {
-    if(!newName) return alert('Enter name');
+    if(!newName &&!selectedExistingId) return alert('Enter name');
     if(editingFamilyId){
       setAdding(true);
       try{
@@ -147,7 +165,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         setProfiles(refreshed || []);
         setShowAddmodel(false);
         setEditingFamilyId(null);
-        setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild('');
+        setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null);
       }catch(e){ alert('Failed: '+e.message); }finally{ setAdding(false); }
       return;
     }
@@ -159,6 +177,36 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     setAdding(true);
     try {
       const target = activeSelf || self;
+
+      if(selectedExistingId){
+        const linkRes = await fetch('/api/profiles/link', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            my_profile_id: target?.id || self.id,
+            existing_profile_id: selectedExistingId,
+            relation: newRelation
+          })
+        });
+        const linkData = await linkRes.json();
+        if(!linkRes.ok) throw new Error(linkData.error || 'Link failed');
+        const refreshed = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json());
+        setProfiles(refreshed || []);
+        const relRef = await fetch(`/api/relations?owner_profile_id=${self.id}`).then(r=>r.json());
+        setRelations(relRef || []);
+        if(viewProfileId){
+          const treeRes = await fetch(`/api/family-tree/${viewProfileId}`);
+          const treeData = await treeRes.json();
+          setActiveTree(treeData || []);
+          const relRes2 = await fetch(`/api/relations?owner_profile_id=${viewProfileId}`);
+          setActiveRelations(await relRes2.json() || []);
+        }
+        setShowAddmodel(false);
+        setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null);
+        alert('Linked to existing member ✅ Now his family will show in tree');
+        return;
+      }
+
       const genderForNew = newRelation === 'Father'? 'Male' : newRelation === 'Mother'? 'Female' : newRelation === 'Spouse'? (target?.gender === 'Male'? 'Female' : 'Male') : null;
       const spouseList = profiles.filter(p => relations.filter(r => r.relation_type === 'Spouse').map(r=>r.related_profile_id).includes(p.id));
       let linkedSpouseId = null;
@@ -196,8 +244,15 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
       setProfiles(refreshed || []);
       const relRef = await fetch(`/api/relations?owner_profile_id=${self.id}`).then(r=>r.json());
       setRelations(relRef || []);
+      if(viewProfileId){
+        const treeRes = await fetch(`/api/family-tree/${viewProfileId}`);
+        const treeData = await treeRes.json();
+        setActiveTree(treeData || []);
+        const relRes2 = await fetch(`/api/relations?owner_profile_id=${viewProfileId}`);
+        setActiveRelations(await relRes2.json() || []);
+      }
       setShowAddmodel(false);
-      setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild('');
+      setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null);
     } catch(e){ alert('Failed: ' + e.message); } finally { setAdding(false); }
   };
 
@@ -220,10 +275,11 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     setNewPreview(p.photo_url || '');
     setNewPhoto(null);
     setSelectedSpouseForChild('');
+    setSearchResults([]);
+    setSelectedExistingId(null);
     setShowAddmodel(true);
   };
 
-  // FIXED: click on family photo -> show that member's FULL tree
   const handleMemberPhotoClick = async (member) => {
     if(member.id === self?.id) {
       handleBackToMyTree();
@@ -256,7 +312,6 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const goDeck = () => { if (onDeck) onDeck(); else if (onBack) onBack(); };
   if (!self) return <div className="p-10">Loading {currentUserId}...</div>;
 
-  // FIXED: use activeTree / activeRelations when viewing other
   const sourceProfiles = activeTree || profiles;
   const sourceRelations = isViewingOther? activeRelations : relations;
 
@@ -368,11 +423,10 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
           )}
         </div>
 
-        {/* MIDDLE TREE - BEIGE HEADER SMALL ROUND */}
         <div className="col-span-12 lg:col-span-6 flex flex-col gap-0">
           <div className="bg-[#efe8d3] border border-[#e9e2d6] border-b-0 rounded-t-[10px] p-4 flex justify-between items-center">
             <h2 className="font-extrabold text-[13px]">{isViewingOther? `${activeSelf?.display_name}'s Family Tree` : "My Family Tree"}</h2>
-            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">
+            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">
               {isViewingOther? `+ Add ${firstName}'s Family Member` : "+ Add Family Member"}
             </button>
           </div>
@@ -407,21 +461,21 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 
       {showAddmodel && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[10px] w-full max-w-[380px] p-6">
+          <div className="bg-white rounded-[10px] w-full max-w-[380px] p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-extrabold text-[16px]">
                 {editingFamilyId
-                ? 'Edit Family Member'
+             ? 'Edit Family Member'
                   : isViewingOther
-                  ? `Add ${activeSelf?.display_name}'s Family Member`
+               ? `Add ${activeSelf?.display_name}'s Family Member`
                     : 'Add Family Member'}
               </h3>
-              <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); }} className="w-8 h-8 bg-gray-100 rounded-full">✕</button>
+              <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); }} className="w-8 h-8 bg-gray-100 rounded-full">✕</button>
             </div>
             <div className="space-y-3">
               <p className="text-[11px] text-gray-500">
                 {isViewingOther &&!editingFamilyId
-                ? `Adding to ${activeSelf?.display_name}'s family tree`
+             ? `Adding to ${activeSelf?.display_name}'s family tree`
                   : "Add a new member to family tree"}
               </p>
               <select value={newRelation} onChange={e=>setNewRelation(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px] font-bold">
@@ -435,14 +489,41 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
                   ))}
                 </select>
               )}
-              <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Full Name" className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px]" />
-              <textarea value={newBio} onChange={e=>setNewBio(e.target.value)} placeholder="Small description / bio" className="w-full h-16 bg-[#f8f5f0] rounded-[8px] px-3 py-2 text-[12px]" />
-              <div className="flex items-center gap-3">
-                <input type="file" accept="image/*" onChange={handleNewPhoto} className="text-[11px]" />
-                {newPreview && <img src={newPreview} className="w-12 h-12 rounded-[8px] object-cover" />}
+              <div className="relative">
+                <input value={newName} onChange={e=>{setNewName(e.target.value); setSelectedExistingId(null);}} placeholder="Full Name" className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px]" />
+                {selectedExistingId && <p className="text-[10px] text-green-600 font-bold mt-1">✓ Linking to existing member</p>}
+                {searching && <p className="text-[10px] text-gray-400 mt-1">Searching...</p>}
+                {searchResults.length > 0 &&!editingFamilyId &&!selectedExistingId && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-[#e9e2d6] rounded-[8px] shadow-lg max-h-[180px] overflow-y-auto">
+                    <p className="text-[9px] text-gray-500 px-3 py-1 font-bold bg-[#f8f5f0]">{'Type G → G names, Go → Go names. Click to link.'}</p>
+                    {searchResults.map(r=>(
+                      <div key={r.id} onClick={()=>{ setSelectedExistingId(r.id); setNewName(r.display_name); setSearchResults([]); }} className="px-3 py-2 hover:bg-[#efe8d3] cursor-pointer flex items-center gap-2 border-b border-gray-50">
+                        {r.photo_url? <img src={r.photo_url} className="w-6 h-6 rounded-full object-cover" alt="" /> : <div className="w-6 h-6 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[10px] font-bold">{r.display_name[0]}</div>}
+                        <div className="flex-1"><p className="text-[11px] font-bold">{r.display_name}</p><p className="text-[8px] text-gray-500 truncate">{r.id} {r.father_id? '• has father' : ''} {r.mother_id? '• has mother' : ''}</p></div>
+                        <span className="text-[9px] bg-black text-white px-2 py-0.5 rounded-full">Link</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+              {!selectedExistingId && (
+                <>
+                  <textarea value={newBio} onChange={e=>setNewBio(e.target.value)} placeholder="Small description / bio" className="w-full h-16 bg-[#f8f5f0] rounded-[8px] px-3 py-2 text-[12px]" />
+                  <div className="flex items-center gap-3">
+                    <input type="file" accept="image/*" onChange={handleNewPhoto} className="text-[11px]" />
+                    {newPreview && <img src={newPreview} className="w-12 h-12 rounded-[8px] object-cover" />}
+                  </div>
+                </>
+              )}
+              {selectedExistingId && (
+                <div className="bg-[#efe8d3] p-3 rounded-[8px] text-[11px]">
+                  <p className="font-bold">Will link as {newRelation} of {activeSelf?.display_name || self?.display_name}</p>
+                  <p className="text-[10px] text-gray-600 mt-1">His/her already saved parents, spouse, children will automatically show in tree — no duplicate.</p>
+                  <button onClick={()=>{setSelectedExistingId(null); setNewName(''); setSearchResults([]);}} className="text-[10px] underline mt-1">Create new instead</button>
+                </div>
+              )}
               <button onClick={handleAddFamily} disabled={adding} className="w-full h-11 bg-black text-white rounded-full font-bold text-[12px] mt-2">
-                {adding? 'Saving...' : editingFamilyId? 'Save' : isViewingOther? `Add as ${firstName}'s ${newRelation}` : `Add as ${newRelation}`}
+                {adding? 'Saving...' : selectedExistingId? `Link as ${newRelation} ✅` : editingFamilyId? 'Save' : isViewingOther? `Add as ${firstName}'s ${newRelation}` : `Add as ${newRelation}`}
               </button>
             </div>
           </div>
