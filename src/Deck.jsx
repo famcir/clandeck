@@ -135,7 +135,6 @@ export default function Deck({ onGoProfile, onLogout }) {
           return;
         }
       } catch(e) {}
-
       const firstName=(target.display_name||'User').split(' ')[0].replace(/[^a-zA-Z0-9]/g,'');
       const tempUsername=`UN${firstName}`;
       const tempPassword='pw1234';
@@ -153,7 +152,6 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   const allProfiles = extendedTree.length>0? extendedTree : treeProfiles;
   const displayCount = treeDepth===0? treeProfiles.length : allProfiles.length;
-
   const treeTitle = isViewingOther && treeSelf?.display_name? `${treeSelf.display_name.split(' ')[0]}'s Family Tree` : 'My Family Tree';
   const isSameProfile = displayProfile?.id && treeSelf?.id && displayProfile.id === treeSelf.id;
   const isLoginUserProfile = displayProfile?.id === loggedProfile?.id || displayProfile?.id === currentUserId;
@@ -233,17 +231,33 @@ export default function Deck({ onGoProfile, onLogout }) {
                   const canvasH = hasParents? 552 : (hasSibs? 420 : 360);
                   return (
                     <div className="relative" style={{width:`${canvasW}px`,height:`${canvasH}px`,minWidth:'500px', marginLeft:'0', marginRight:'auto', overflow:'visible'}}>
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2, overflow:'visible'}}>
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:0, overflow:'visible'}}>
                         {father && mother && <line x1={584-shiftX} y1={212-shiftY} x2={616-shiftX} y2={212-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
                         {(father || mother) && <line x1={600-shiftX} y1={212-shiftY} x2={600-shiftX} y2={312-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
                         {treeSelf && spouse && <line x1={638-shiftX} y1={352-shiftY} x2={670-shiftX} y2={352-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
                         {treeSelf && spouse && children.length>0 && (
-                          <>
-                            <line x1={654-shiftX} y1={352-shiftY} x2={654-shiftX} y2={434-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>
-                            {children.length>1 && <line x1={654-shiftX} y1={434-shiftY} x2={654 + (children.length-1)*80 + 32 - shiftX} y2={434-shiftY} stroke="#c9ad83" strokeWidth="1.2"/>}
-                            {children.map((_,i)=> <line key={`c-${i}`} x1={654 + i*80 - shiftX} y1={434-shiftY} x2={654 + i*80 - shiftX} y2={444-shiftY} stroke="#c9ad83" strokeWidth="1.2"/>)}
-                          </>
+                          <line x1={654-shiftX} y1={352-shiftY} x2={654-shiftX} y2={444-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>
                         )}
+                        {treeSelf && children.length>1 && (() => {
+                          const childRowLeft = spouse? 622 : 568;
+                          const childGap = 80;
+                          const childW = 64;
+                          const childTop = 444;
+                          const drop = 12;
+                          const firstCX = childRowLeft + childW/2 - shiftX;
+                          const topY = childTop - drop - shiftY;
+                          const lastCX = childRowLeft + (children.length-1)*childGap + childW/2 - shiftX;
+                          return (
+                            <>
+                              <line x1={firstCX} y1={topY} x2={lastCX} y2={topY} stroke="#c9ad83" strokeWidth="1.2"/>
+                              {children.slice(1).map((_, idx) => {
+                                const i = idx + 1;
+                                const cx = childRowLeft + i*childGap + childW/2 - shiftX;
+                                return <line key={`cdrop-${i}`} x1={cx} y1={topY} x2={cx} y2={childTop - shiftY} stroke="#c9ad83" strokeWidth="1.2"/>;
+                              })}
+                            </>
+                          );
+                        })()}
                         {siblings.length>1 && (
                           <>
                             <line x1={472-shiftX} y1={236-shiftY} x2={472 - (siblings.length-1)*100 - shiftX} y2={236-shiftY} stroke="#c9ad83" strokeWidth="1.2"/>
@@ -259,17 +273,22 @@ export default function Deck({ onGoProfile, onLogout }) {
                       </svg>
                       {father && mother && <div className="absolute" style={{left:`${593-shiftX}px`,top:`${190-shiftY}px`,zIndex:3,fontSize:'10px'}}>❤️</div>}
                       {treeSelf && spouse && <div className="absolute" style={{left:`${647-shiftX}px`,top:`${330-shiftY}px`,zIndex:3,fontSize:'10px'}}>❤️</div>}
-                      <div className="absolute" style={{left:`${520-shiftX}px`,top:`${180-shiftY}px`}}>{father && <Node p={father} />}</div>
-                      <div className="absolute" style={{left:`${616-shiftX}px`,top:`${180-shiftY}px`}}>{mother && <Node p={mother} />}</div>
+                      <div className="absolute" style={{left:`${520-shiftX}px`,top:`${180-shiftY}px`,zIndex:3}}>{father && <Node p={father} />}</div>
+                      <div className="absolute" style={{left:`${616-shiftX}px`,top:`${180-shiftY}px`,zIndex:3}}>{mother && <Node p={mother} />}</div>
                       {siblings.map((s, idx) => (
-                        <div key={s.id} className="absolute" style={{left:`${440 - idx*100 - shiftX}px`, top:`${246-shiftY}px`}}>
+                        <div key={s.id} className="absolute" style={{left:`${440 - idx*100 - shiftX}px`, top:`${246-shiftY}px`,zIndex:3}}>
                           <Node p={s} />
                         </div>
                       ))}
                       <div className="absolute" style={{left:`${562-shiftX}px`,top:`${312-shiftY}px`,zIndex:3}}><Node p={treeSelf} big /></div>
-                      <div className="absolute" style={{left:`${670-shiftX}px`,top:`${320-shiftY}px`}}>{spouse && <Node p={spouse} />}</div>
-                      <div className="absolute flex gap-4" style={{left: spouse? `${622-shiftX}px` : `${568-shiftX}px`, top:`${444-shiftY}px`, flexWrap:'nowrap', maxWidth:'none'}}>
-                        {children.map(c=> <Node key={c.id} p={c} />)}
+                      <div className="absolute" style={{left:`${670-shiftX}px`,top:`${320-shiftY}px`,zIndex:3}}>{spouse && <Node p={spouse} />}</div>
+                      {/* FIXED: exact 64px wrappers + 16px gap = 80 pitch, drop exactly centre */}
+                      <div className="absolute flex" style={{left: spouse? `${622-shiftX}px` : `${568-shiftX}px`, top:`${444-shiftY}px`, gap:'16px', flexWrap:'nowrap', zIndex:3}}>
+                        {children.map(c=> (
+                          <div key={c.id} style={{width:'64px', flexShrink:0}}>
+                            <Node p={c} />
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
