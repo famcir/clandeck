@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import logo from './assets/clandeck_h.png';
 import mangoBasket from './assets/mango-basket.png';
 
+const HomeIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+);
+const LogoutIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+);
+
 export default function Deck({ onGoProfile, onLogout }) {
   const currentUserId = localStorage.getItem('userId') || 'ur001';
   const [loggedProfile, setLoggedProfile] = useState(null);
@@ -154,10 +161,25 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}`}</style>
-      <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-6 justify-between sticky top-0 z-20 w-full">
-        <div className="flex items-center gap-3"><img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />{isViewingOther && <button onClick={handleBackToMyTree} className="ml-2 px-4 h-8 bg-black text-white rounded-full text-[11px] font-bold">Deck</button>}</div>
-        <div className="flex items-center gap-3"><button onClick={onLogout} className="px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Logout</button>{loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}</div>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0;-webkit-overflow-scrolling:touch}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}@media(max-width:768px){.family-scroll{height:520px;overflow:auto!important}.family-scroll svg{overflow:visible!important}}`}</style>
+      <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-6 justify-between sticky top-0 z-20 w-full">
+        <div className="flex items-center gap-3">
+          <img src={logo} alt="Clandeck" className="h-[44px] md:h-[60px] w-auto object-contain" />
+          {isViewingOther && (
+            <button onClick={handleBackToMyTree} className="ml-2 px-3 md:px-4 h-9 bg-black text-white rounded-full text-[12px] font-bold flex items-center gap-1.5">
+              <span className="md:hidden"><HomeIcon /></span>
+              <span className="hidden md:inline">Home</span>
+              <span className="md:hidden">Home</span>
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onLogout} className="px-3 md:px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold flex items-center justify-center gap-1.5 min-w-[40px]">
+            <span className="hidden md:inline">Logout</span>
+            <span className="md:hidden"><LogoutIcon /></span>
+          </button>
+          {loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}
+        </div>
       </header>
       <div className="p-4 grid grid-cols-12 gap-4 w-full">
         <div className="col-span-12 lg:col-span-3 space-y-4">
@@ -190,8 +212,8 @@ export default function Deck({ onGoProfile, onLogout }) {
               <span className="text-[11px] bg-white px-3 py-1 rounded-full font-bold border border-[#e9e2d6]">{displayCount} Members</span>
             </div>
           </div>
-          <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] rounded-t-none p-0 w-full overflow-hidden">
-            <div className="family-scroll">
+          <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] rounded-t-none p-0 w-full overflow-x-auto overflow-y-visible">
+            <div className="family-scroll" style={{overflow:'visible'}}>
               {treeDepth===0? (
                 (() => {
                   const hasParents =!!(father || mother);
@@ -210,8 +232,8 @@ export default function Deck({ onGoProfile, onLogout }) {
                   const canvasW = Math.max(500, 180 + siblings.length*110 + children.length*80) + 64;
                   const canvasH = hasParents? 552 : (hasSibs? 420 : 360);
                   return (
-                    <div className="relative" style={{width:`${canvasW}px`,height:`${canvasH}px`,minWidth:'500px', marginLeft:'0', marginRight:'auto'}}>
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2}}>
+                    <div className="relative" style={{width:`${canvasW}px`,height:`${canvasH}px`,minWidth:'500px', marginLeft:'0', marginRight:'auto', overflow:'visible'}}>
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2, overflow:'visible'}}>
                         {father && mother && <line x1={584-shiftX} y1={212-shiftY} x2={616-shiftX} y2={212-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
                         {(father || mother) && <line x1={600-shiftX} y1={212-shiftY} x2={600-shiftX} y2={312-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
                         {treeSelf && spouse && <line x1={638-shiftX} y1={352-shiftY} x2={670-shiftX} y2={352-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
@@ -253,7 +275,7 @@ export default function Deck({ onGoProfile, onLogout }) {
                   );
                 })()
               ) : treeDepth===1? (
-                <div className="relative" style={{width:'1200px',height:'520px',minWidth:'1200px'}}>
+                <div className="relative" style={{width:'1200px',height:'520px',minWidth:'1200px', overflow:'visible'}}>
                   <div className="absolute flex gap-6" style={{left:'20px',top:'10px',flexWrap:'wrap',maxWidth:'1100px'}}>
                     {allProfiles.filter(p=>p.computed_relation==='Father').map(p=><Node key={p.id} p={p} />)}
                   </div>
