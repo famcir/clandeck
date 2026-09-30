@@ -164,19 +164,16 @@ export default function Deck({ onGoProfile, onLogout }) {
         <div className="flex items-center gap-3">
           <img src={logo} alt="Clandeck" className="h-[44px] md:h-[60px] w-auto object-contain" />
           {isViewingOther && (
-            <button onClick={handleBackToMyTree} className="ml-2 px-3 md:px-4 h-9 bg-black text-white rounded-full text-[12px] font-bold flex items-center gap-1.5">
-              <span className="md:hidden"><HomeIcon /></span>
-              <span className="hidden md:inline">Home</span>
-              <span className="md:hidden">Home</span>
+            <button onClick={handleBackToMyTree} className="ml-2 px-4 h-[32px] bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">
+              Home
             </button>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={onLogout} className="px-3 md:px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold flex items-center justify-center gap-1.5 min-w-[40px]">
-            <span className="hidden md:inline">Logout</span>
-            <span className="md:hidden"><LogoutIcon /></span>
+          <button onClick={onLogout} className="px-4 h-[32px] bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">
+            Logout
           </button>
-          {loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-9 h-9 rounded-full object-cover cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer border-2 border-[#c9ad83]" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}
+          {loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-8 h-8 rounded-[4px] object-cover cursor-pointer border border-[#e9e2d6]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-8 h-8 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}
         </div>
       </header>
       <div className="p-4 grid grid-cols-12 gap-4 w-full">

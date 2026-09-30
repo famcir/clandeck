@@ -331,7 +331,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const Node = ({ p, big }) => {
     if (!p) return null;
     const hasPhoto = p.photo_url && p.photo_url.trim()!== '';
-    const initial = (p.display_name || '?').trim().charAt(0).toUpperCase();
+    const initial = (p.display_name || '?').trim().CharAt? (p.display_name || '?').trim().charAt(0).toUpperCase() : (p.display_name || '?').trim().charAt(0).toUpperCase();
     return (
       <div onClick={() => p && handleMemberPhotoClick(p)} className="flex flex-col items-center cursor-pointer group relative shrink-0 hover:scale-105 transition-transform">
         <div className={`${big? 'tree-node-big' : 'tree-node'} rounded-[8px] border flex items-center justify-center overflow-hidden shrink-0 ${big? 'bg-[#c9ad83] text-white' : 'bg-[#f8f5f0] text-[#5a4a32]'}`}>
@@ -342,8 +342,8 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
           {big && <span className="tree-label font-bold">(you)</span>}
           {!big && (
             <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition">
-              <button onClick={(e)=>{e.stopPropagation(); handleEdit(p)}} className="text-[8px] bg-black text-white px-1.5 py-0.5 rounded-full">Edit</button>
-              <button onClick={(e)=>{e.stopPropagation(); handleDelete(p.id)}} className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-full">X</button>
+              <button onClick={(e)=>{e.stopPropagation(); handleEdit(p)}} className="text-[8px] bg-black text-white px-1.5 py-0.5 rounded-[4px]">Edit</button>
+              <button onClick={(e)=>{e.stopPropagation(); handleDelete(p.id)}} className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-[4px]">X</button>
             </div>
           )}
         </div>
@@ -363,17 +363,17 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
 .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
       `}</style>
-      <header className="h-[68px] bg-[#fffefb] border-b flex items-center px-6 justify-between">
+      <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-6 justify-between sticky top-0 z-20 w-full">
         <div className="flex items-center gap-3">
-          <img src={logo} alt="Clandeck" className="h-[60px] w-auto object-contain" />
-          <button onClick={goDeck} className="ml-2 px-5 h-9 bg-black text-white rounded-full text-[12px] font-bold">Deck</button>
+          <img src={logo} alt="Clandeck" className="h-[44px] md:h-[60px] w-auto object-contain" />
+          <button onClick={goDeck} className="ml-2 px-4 h-8 bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Deck</button>
           {isViewingOther && (
-            <button onClick={handleBackToMyTree} className="ml-2 px-4 h-8 bg-[#efe8d3] border border-[#e9e2d6] rounded-full text-[11px] font-bold">← {self?.display_name?.split(' ')[0]}'s Tree</button>
+            <button onClick={handleBackToMyTree} className="ml-2 px-4 h-8 bg-[#efe8d3] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold">← {self?.display_name?.split(' ')[0]}'s Tree</button>
           )}
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={onLogout} className="px-4 h-9 bg-black text-white rounded-full text-[12px]">Logout</button>
-          {self?.photo_url? <img src={self.photo_url} className="w-9 h-9 rounded-full object-cover" alt="" /> : <div className="w-9 h-9 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[12px] font-bold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
+          <button onClick={onLogout} className="px-4 h-8 bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Logout</button>
+          {self?.photo_url? <img src={self.photo_url} className="w-9 h-9 rounded-[4px] object-cover border border-[#e9e2d6]" alt="" /> : <div className="w-9 h-9 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[12px] font-bold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
         </div>
       </header>
       <div className="grid grid-cols-12 gap-4 p-4 w-full">
@@ -400,8 +400,8 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
           {!isEditing? (
             <>
               <div className="mt-6 flex gap-2">
-                <button onClick={()=>setIsEditing(true)} className="flex-1 py-2.5 bg-black text-white rounded-full font-bold text-[12px]">Edit Profile</button>
-                <button className="flex-1 py-2.5 bg-[#827d74] text-white rounded-full font-bold text-[12px]">Share</button>
+                <button onClick={()=>setIsEditing(true)} className="flex-1 py-2.5 bg-black text-white rounded-[4px] font-bold text-[12px]">Edit Profile</button>
+                <button className="flex-1 py-2.5 bg-[#827d74] text-white rounded-[4px] font-bold text-[12px]">Share</button>
               </div>
               <div className="mt-5 space-y-3 text-[12px]">
                 <div className="text-left"><p className="text-[11px] text-gray-500 font-bold">Bio</p><p className="bg-[#f8f5f0] p-3 rounded-xl mt-1 text-[12px]">{self.bio || 'No bio yet.'}</p></div>
@@ -416,8 +416,8 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
               <div><label className="text-[10px] font-bold text-gray-500">DOB</label><input type="date" value={editForm.dob} onChange={e=>setEditForm({...editForm, dob: e.target.value})} className="w-full h-10 bg-[#f8f5f0] border border-[#e9e2d6] rounded-xl px-3 text-[12px] mt-1" /></div>
               <div><label className="text-[10px] font-bold text-gray-500">LOCATION</label><input value={editForm.location} onChange={e=>setEditForm({...editForm, location: e.target.value})} placeholder="City, State" className="w-full h-10 bg-[#f8f5f0] border border-[#e9e2d6] rounded-xl px-3 text-[12px] mt-1" /></div>
               <div className="flex gap-2 pt-2">
-                <button onClick={()=>setIsEditing(false)} className="flex-1 py-2.5 bg-[#f2efe8] border border-[#e9e2d6] rounded-full font-bold text-[12px]">Cancel</button>
-                <button onClick={handleSaveProfile} disabled={saving} className="flex-1 py-2.5 bg-black text-white rounded-full font-bold text-[12px]">{saving? 'Saving...' : 'Save'}</button>
+                <button onClick={()=>setIsEditing(false)} className="flex-1 py-2.5 bg-[#f2efe8] border border-[#e9e2d6] rounded-[4px] font-bold text-[12px]">Cancel</button>
+                <button onClick={handleSaveProfile} disabled={saving} className="flex-1 py-2.5 bg-black text-white rounded-[4px] font-bold text-[12px]">{saving? 'Saving...' : 'Save'}</button>
               </div>
             </div>
           )}
@@ -426,7 +426,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         <div className="col-span-12 lg:col-span-6 flex flex-col gap-0">
           <div className="bg-[#efe8d3] border border-[#e9e2d6] border-b-0 rounded-t-[10px] p-4 flex justify-between items-center">
             <h2 className="font-extrabold text-[13px]">{isViewingOther? `${activeSelf?.display_name}'s Family Tree` : "My Family Tree"}</h2>
-            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-full text-[11px] font-bold">
+            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-[4px] text-[11px] font-bold">
               {isViewingOther? `+ Add ${firstName}'s Family Member` : "+ Add Family Member"}
             </button>
           </div>
@@ -465,17 +465,17 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-extrabold text-[16px]">
                 {editingFamilyId
-             ? 'Edit Family Member'
+            ? 'Edit Family Member'
                   : isViewingOther
-               ? `Add ${activeSelf?.display_name}'s Family Member`
+              ? `Add ${activeSelf?.display_name}'s Family Member`
                     : 'Add Family Member'}
               </h3>
-              <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); }} className="w-8 h-8 bg-gray-100 rounded-full">✕</button>
+              <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); }} className="w-8 h-8 bg-gray-100 rounded-[4px]">✕</button>
             </div>
             <div className="space-y-3">
               <p className="text-[11px] text-gray-500">
                 {isViewingOther &&!editingFamilyId
-             ? `Adding to ${activeSelf?.display_name}'s family tree`
+            ? `Adding to ${activeSelf?.display_name}'s family tree`
                   : "Add a new member to family tree"}
               </p>
               <select value={newRelation} onChange={e=>setNewRelation(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px] font-bold">
@@ -498,9 +498,9 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
                     <p className="text-[9px] text-gray-500 px-3 py-1 font-bold bg-[#f8f5f0]">{'Type G → G names, Go → Go names. Click to link.'}</p>
                     {searchResults.map(r=>(
                       <div key={r.id} onClick={()=>{ setSelectedExistingId(r.id); setNewName(r.display_name); setSearchResults([]); }} className="px-3 py-2 hover:bg-[#efe8d3] cursor-pointer flex items-center gap-2 border-b border-gray-50">
-                        {r.photo_url? <img src={r.photo_url} className="w-6 h-6 rounded-full object-cover" alt="" /> : <div className="w-6 h-6 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[10px] font-bold">{r.display_name[0]}</div>}
+                        {r.photo_url? <img src={r.photo_url} className="w-6 h-6 rounded-[4px] object-cover" alt="" /> : <div className="w-6 h-6 rounded-[4px] bg-[#c9ad83] text-white flex items-center justify-center text-[10px] font-bold">{r.display_name[0]}</div>}
                         <div className="flex-1"><p className="text-[11px] font-bold">{r.display_name}</p><p className="text-[8px] text-gray-500 truncate">{r.id} {r.father_id? '• has father' : ''} {r.mother_id? '• has mother' : ''}</p></div>
-                        <span className="text-[9px] bg-black text-white px-2 py-0.5 rounded-full">Link</span>
+                        <span className="text-[9px] bg-black text-white px-2 py-0.5 rounded-[4px]">Link</span>
                       </div>
                     ))}
                   </div>
@@ -522,7 +522,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
                   <button onClick={()=>{setSelectedExistingId(null); setNewName(''); setSearchResults([]);}} className="text-[10px] underline mt-1">Create new instead</button>
                 </div>
               )}
-              <button onClick={handleAddFamily} disabled={adding} className="w-full h-11 bg-black text-white rounded-full font-bold text-[12px] mt-2">
+              <button onClick={handleAddFamily} disabled={adding} className="w-full h-11 bg-black text-white rounded-[4px] font-bold text-[12px] mt-2">
                 {adding? 'Saving...' : selectedExistingId? `Link as ${newRelation} ✅` : editingFamilyId? 'Save' : isViewingOther? `Add as ${firstName}'s ${newRelation}` : `Add as ${newRelation}`}
               </button>
             </div>
