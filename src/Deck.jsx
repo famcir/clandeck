@@ -9,7 +9,7 @@ const LogoutIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
 );
 
-export default function Deck({ onGoProfile, onLogout }) {
+export default function Deck({ onGoProfile, onGoMemberAdd, onLogout }) {
   const currentUserId = localStorage.getItem('userId') || 'ur001';
   const [loggedProfile, setLoggedProfile] = useState(null);
   const [treeProfiles, setTreeProfiles] = useState([]);
@@ -22,10 +22,14 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [treeDepth, setTreeDepth] = useState(0);
   const [extendedTree, setExtendedTree] = useState([]);
   const [mangoCount, setMangoCount] = useState(0);
+  const [myGroups, setMyGroups] = useState([]);
+
+  const onlyFml = (arr) => (arr||[]).filter(p =>!p.category || p.category === 'Fml');
 
   const computeFallbackRelations = (all, self) => {
-    if (!self) return all;
-    return all.map(p => {
+    if (!self) return onlyFml(all);
+    const fmlAll = onlyFml(all);
+    return fmlAll.map(p => {
       if (p.computed_relation) return p;
       if (p.id === self.id) return {...p, computed_relation: 'Self' };
       if (p.id === self.father_id) return {...p, computed_relation: 'Father' };
@@ -43,16 +47,18 @@ export default function Deck({ onGoProfile, onLogout }) {
       const res = await fetch(`/api/family-tree/${profileId}`);
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
-        setTreeProfiles(data);
-        const self = data.find(p => p.computed_relation === 'Self' || p.id === profileId) || data[0];
+        const fmlOnly = onlyFml(data);
+        setTreeProfiles(fmlOnly);
+        const self = fmlOnly.find(p => p.computed_relation === 'Self' || p.id === profileId) || fmlOnly[0];
         setTreeSelf(self);
         if (shouldUpdateDisplay) setDisplayProfile(self);
         return;
       }
     } catch(e) {}
     const all = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).catch(()=>[]);
-    const self = all?.find(p=>p.id===profileId) || all?.[0] || null;
-    const withRelations = computeFallbackRelations(all || [], self);
+    const fmlAll = onlyFml(all);
+    const self = fmlAll?.find(p=>p.id===profileId) || fmlAll?.[0] || null;
+    const withRelations = computeFallbackRelations(fmlAll || [], self);
     setTreeProfiles(withRelations);
     setTreeSelf(self);
     if (shouldUpdateDisplay) setDisplayProfile(self);
@@ -60,12 +66,17 @@ export default function Deck({ onGoProfile, onLogout }) {
 
   useEffect(() => {
     fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(data=>{
-      const me = data?.find(p=>p.id===currentUserId) || data?.find(p=>p.father_id===null && p.mother_id===null) || data?.[0];
+      const fmlOnly = onlyFml(data);
+      const me = fmlOnly?.find(p=>p.id===currentUserId) || fmlOnly?.find(p=>p.father_id===null && p.mother_id===null) || fmlOnly?.[0];
       setLoggedProfile(me); setDisplayProfile(me);
-      if(viewUserId===currentUserId){ if(me?.id) loadTree(me.id,false); else { setTreeProfiles(data||[]); setTreeSelf(me); } }
+      if(viewUserId===currentUserId){ if(me?.id) loadTree(me.id,false); else { setTreeProfiles(fmlOnly); setTreeSelf(me); } }
     });
     fetch(`/api/basket/${currentUserId}`).then(r=>r.json()).then(b=>{
       setMangoCount(b.claimed);
+    }).catch(()=>{});
+    // === FIX: load groups for My Groups panel ===
+    fetch(`/api/profile-groups?owner_user_id=${currentUserId}`).then(r=>r.json()).then(g=>{
+      setMyGroups(Array.isArray(g)? g : []);
     }).catch(()=>{});
   }, [currentUserId]);
 
@@ -81,7 +92,7 @@ export default function Deck({ onGoProfile, onLogout }) {
         const flat = results.flat().filter(Boolean);
         const merged = [...base,...flat];
         const unique = Array.from(new Map(merged.map(p=>[p.id,p])).values());
-        setExtendedTree(unique);
+        setExtendedTree(onlyFml(unique));
       });
   },[treeDepth, treeProfiles]);
 
@@ -160,22 +171,33 @@ export default function Deck({ onGoProfile, onLogout }) {
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0;-webkit-overflow-scrolling:touch}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}@media(max-width:768px){.family-scroll{height:520px;overflow:auto!important}.family-scroll svg{overflow:visible!important}}`}</style>
-      <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-6 justify-between sticky top-0 z-20 w-full">
-        <div className="flex items-center gap-3">
-          <img src={logo} alt="Clandeck" className="h-[44px] md:h-[60px] w-auto object-contain" />
+
+      <header className="h-[78px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-5 justify-between sticky top-0 z-20 w-full">
+        <div className="flex items-center gap-2 md:gap-3">
+          <img src={logo} alt="Clandeck" className="h-[36px] md:h-[42px] w-auto object-contain" />
           {isViewingOther && (
-            <button onClick={handleBackToMyTree} className="ml-2 px-4 h-[32px] bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">
-              Home
-            </button>
+            <button onClick={handleBackToMyTree} className="px-3 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Home</button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onLogout} className="px-4 h-[32px] bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">
-            Logout
+        <div className="hidden lg:flex items-center gap-6 text-[13px] font-bold text-[#5a4a32] absolute left-1/2 -translate-x-1/2">
+          <span className="text-black border-b-2 border-black pb-0.5">Family Tree</span>
+          <button onClick={onGoMemberAdd} className="opacity-60 hover:opacity-100 hover:text-black transition-opacity">Members</button>
+          <span className="opacity-40">Groups</span>
+        </div>
+        <div className="flex items-center gap-2 md:gap-3">
+          <button onClick={onGoMemberAdd} className="lg:hidden px-3 h-8 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold">Members</button>
+          <button className="w-8 h-8 md:w-9 md:h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] flex items-center justify-center hover:bg-[#efe8d3] transition-colors">
+            <svg className="w-4 h-4 text-[#5a4a32]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M21 21l-4.3-4.3"/></svg>
           </button>
-          {loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-8 h-8 rounded-[4px] object-cover cursor-pointer border border-[#e9e2d6]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-8 h-8 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[12px] font-bold cursor-pointer" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}
+          <button className="w-8 h-8 md:w-9 md:h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] flex items-center justify-center hover:bg-[#efe8d3] transition-colors relative">
+            <svg className="w-4 h-4 text-[#5a4a32]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 7 6 5 6 9H0s6-2 6-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+          </button>
+          <button onClick={onLogout} className="px-3 md:px-4 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] md:text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Logout</button>
+          {loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] object-cover cursor-pointer border border-[#e9e2d6]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[11px] font-bold cursor-pointer" title="Click to edit profile">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}
         </div>
       </header>
+
       <div className="p-4 grid grid-cols-12 gap-4 w-full">
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <div className="card p-6 text-center">
@@ -279,7 +301,6 @@ export default function Deck({ onGoProfile, onLogout }) {
                       ))}
                       <div className="absolute" style={{left:`${562-shiftX}px`,top:`${312-shiftY}px`,zIndex:3}}><Node p={treeSelf} big /></div>
                       <div className="absolute" style={{left:`${670-shiftX}px`,top:`${320-shiftY}px`,zIndex:3}}>{spouse && <Node p={spouse} />}</div>
-                      {/* FIXED: exact 64px wrappers + 16px gap = 80 pitch, drop exactly centre */}
                       <div className="absolute flex" style={{left: spouse? `${622-shiftX}px` : `${568-shiftX}px`, top:`${444-shiftY}px`, gap:'16px', flexWrap:'nowrap', zIndex:3}}>
                         {children.map(c=> (
                           <div key={c.id} style={{width:'64px', flexShrink:0}}>
@@ -314,7 +335,22 @@ export default function Deck({ onGoProfile, onLogout }) {
           </div>
         </div>
         <div className="col-span-12 lg:col-span-3 space-y-4">
-          <div className="card p-5"><h3 className="font-extrabold text-[13px] mb-3">My Groups</h3></div>
+          <div className="card p-5">
+            <h3 className="font-extrabold text-[13px] mb-3">My Groups</h3>
+            {myGroups.length===0? (
+              <p className="text-[11px] text-gray-400">No groups yet</p>
+            ) : (
+              <div className="space-y-2">
+                {myGroups.map(g=> (
+                  <div key={g.id} className="flex justify-between items-center bg-[#f8f5f0] border border-[#e9e2d6] rounded-[6px] px-3 py-2">
+                    <span className="text-[12px] font-bold">{g.name}</span>
+                    <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded-full">{g.member_count||0}</span>
+                  </div>
+                ))}
+                <button onClick={onGoMemberAdd} className="w-full mt-2 h-9 bg-black text-white rounded-[4px] text-[11px] font-bold">Manage Groups</button>
+              </div>
+            )}
+          </div>
           <div className="card p-3">
             <p className="text-[10px] font-bold text-gray-400 mb-2 tracking-widest">ADVERTISEMENT</p>
             <div className="w-full bg-[#f8f5f0] border border-dashed border-[#c9ad83] rounded-[8px] flex items-center justify-center relative overflow-hidden" style={{ aspectRatio: '1/1', minHeight: '250px' }}>

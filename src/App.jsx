@@ -4,6 +4,7 @@ import logo from './assets/clandeck-logo.png';
 import Profile from './Profile.jsx';
 import EditProfile from './editprofile.jsx';
 import Deck from './Deck.jsx';
+import Memberadd from './Addmember.jsx';
 
 export default function App() {
   const [username, setUsername] = useState("");
@@ -123,12 +124,21 @@ export default function App() {
   };
 
   if (page === "deck") {
-    return <Deck onGoProfile={() => setPage("profile")} onLogout={() => setPage("login")} />;
+    return <Deck 
+      onGoProfile={() => setPage("profile")} 
+      onGoMemberAdd={() => setPage("memberadd")}
+      onLogout={() => setPage("login")} 
+    />;
   }
 
   if (page === "profile") {
-    return <Profile userName={userName} onLogout={() => setPage("login")} onEdit={() => setPage("editprofile")} onBack={() => setPage("deck")} />;
+    return <Profile userName={userName} onLogout={() => setPage("login")} onEdit={() => setPage("editprofile")} onBack={() => setPage("deck")} onDeck={() => setPage("deck")} />;
   }
+
+  if (page === "memberadd") {
+    return <Memberadd onGoProfile={() => setPage("profile")} onGoDeck={() => setPage("deck")} onLogout={() => setPage("login")} />;
+  }
+
   if (page === "editprofile") {
     return <EditProfile onBack={() => setPage("profile")} />;
   }

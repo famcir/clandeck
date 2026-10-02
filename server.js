@@ -26,7 +26,34 @@ if (!dbUrl) {
 } else {
   try {
     pool = mysql.createPool(dbUrl);
-    pool.getConnection().then(c => { console.log("✅ DB Connected!"); c.release(); }).catch(err => console.error("❌ DB Failed:", err.message));
+    pool.getConnection().then(async c => {
+      console.log("✅ DB Connected!");
+      c.release();
+      // === AUTO CREATE NEW TABLES ===
+      try {
+        await pool.query(`CREATE TABLE IF NOT EXISTS profile_groups (
+          id VARCHAR(255) PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          description TEXT,
+          image_url TEXT,
+          owner_user_id VARCHAR(255),
+          invite_code VARCHAR(20),
+          member_count INT DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`);
+        await pool.query(`CREATE TABLE IF NOT EXISTS group_members (
+          id VARCHAR(255) PRIMARY KEY,
+          group_id VARCHAR(255),
+          profile_id VARCHAR(255),
+          owner_user_id VARCHAR(255),
+          role VARCHAR(50) DEFAULT 'member',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY unique_group_profile (group_id, profile_id)
+        )`);
+        await pool.query(`ALTER TABLE profiles ADD COLUMN category VARCHAR(10) DEFAULT 'Fml'`).catch(()=>{});
+        console.log("✅ Groups tables ready");
+      } catch(e){ console.log("table init:", e.message); }
+    }).catch(err => console.error("❌ DB Failed:", err.message));
   } catch (err) { console.error("Pool error:", err.message); }
 }
 
@@ -155,7 +182,6 @@ app.post('/api/claim-account', async (req, res) => {
   } finally { conn.release(); }
 });
 
-// NEW: Ownership check support for Deck.jsx Share button
 app.get('/api/users', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -186,7 +212,6 @@ app.get('/api/users/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// NEW: Mango basket count - claimed logic
 app.get('/api/basket/:userId', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -354,10 +379,16 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
 app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const { display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id } = req.body;
-    await pool.query(`UPDATE profiles SET display_name=COALESCE(?,display_name), dob=COALESCE(?,dob), photo_url=COALESCE(?,photo_url), is_claimed=COALESCE(?,is_claimed), bio=COALESCE(?,bio), location=COALESCE(?,location), gender=COALESCE(?,gender), father_id=COALESCE(?,father_id), mother_id=COALESCE(?,mother_id) WHERE id=?`, [display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, req.params.id]);
+    const { display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, category } = req.body;
+    await pool.query(`UPDATE profiles SET display_name=COALESCE(?,display_name), dob=COALESCE(?,dob), photo_url=COALESCE(?,photo_url), is_claimed=COALESCE(?,is_claimed), bio=COALESCE(?,bio), location=COALESCE(?,location), gender=COALESCE(?,gender), father_id=COALESCE(?,father_id), mother_id=COALESCE(?,mother_id), category=COALESCE(?,category) WHERE id=?`, [display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, category, req.params.id]);
     res.json({ success: true });
-  } catch(e){ res.status(500).json({error: e.message}) }
+  } catch(e){
+    try {
+      const { display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id } = req.body;
+      await pool.query(`UPDATE profiles SET display_name=COALESCE(?,display_name), dob=COALESCE(?,dob), photo_url=COALESCE(?,photo_url), is_claimed=COALESCE(?,is_claimed), bio=COALESCE(?,bio), location=COALESCE(?,location), gender=COALESCE(?,gender), father_id=COALESCE(?,father_id), mother_id=COALESCE(?,mother_id) WHERE id=?`, [display_name, dob, photo_url, is_claimed, bio, location, gender, father_id, mother_id, req.params.id]);
+      res.json({ success: true });
+    } catch(e2){ res.status(500).json({error: e.message}) }
+  }
 });
 
 app.post('/api/profiles/link', async (req, res) => {
@@ -471,6 +502,7 @@ app.delete('/api/profiles/:id', async (req, res) => {
     } catch(s3e){}
     const [linkedUsers] = await conn.query('SELECT id FROM users WHERE id=? OR shared_profile_id=?', [profileId, profileId]);
     await conn.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
+    try { await conn.query('DELETE FROM group_members WHERE profile_id=?', [profileId]); } catch(e) {}
     if (deleterProfileId) {
       await conn.query('UPDATE profiles SET father_id=NULL WHERE father_id=? AND mother_id!=? AND mother_id IS NOT NULL', [profileId, deleterProfileId]);
       await conn.query('UPDATE profiles SET mother_id=NULL WHERE mother_id=? AND father_id!=? AND father_id IS NOT NULL', [profileId, deleterProfileId]);
@@ -500,11 +532,15 @@ app.post('/api/profiles', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { id, display_name, relation_label, relation, owner_user_id, my_profile_id, photo_url, dob, name, bio, location, gender, father_id, mother_id } = req.body;
+    const { id, display_name, relation_label, relation, owner_user_id, my_profile_id, photo_url, dob, name, bio, location, gender, father_id, mother_id, category, group_ids } = req.body;
     const finalName = display_name || name;
     const finalId = id || `pr_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
     const finalRelation = relation || relation_label || 'Family';
     const myId = my_profile_id || null;
+    // === FIX: keep original category, don't force to Fnd ===
+    let finalCategory = category || 'Fml';
+    if (!['Fml','Fnd'].includes(finalCategory)) finalCategory = 'Fml';
+
     if (!finalName) { await conn.rollback(); return res.status(400).json({ error: "display_name required" }); }
     if (!owner_user_id) { await conn.rollback(); return res.status(400).json({ error: "owner_user_id required" }); }
     let newFatherId = father_id || null;
@@ -522,14 +558,30 @@ app.post('/api/profiles', async (req, res) => {
       if (me) {
         const [spRows] = await conn.query(`SELECT related_profile_id FROM profile_relations WHERE owner_profile_id=? AND relation_type='Spouse' LIMIT 1`, [myId]);
         mySpouseId = spRows[0]?.related_profile_id || null;
-        if (finalRelation === 'Child') {
+        if (finalRelation === 'Child' && finalCategory === 'Fml') {
           if (me.gender === 'Male' || me.gender === null) { newFatherId = myId; newMotherId = mySpouseId; }
           else { newMotherId = myId; newFatherId = mySpouseId; }
-        } else if (finalRelation === 'Sibling') { newFatherId = me.father_id; newMotherId = me.mother_id; }
+        } else if (finalRelation === 'Sibling' && finalCategory === 'Fml') { newFatherId = me.father_id; newMotherId = me.mother_id; }
       }
     }
-    await conn.execute(`INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId]);
-    if (me) {
+    try {
+      await conn.execute(`INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id, category) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId, finalCategory]);
+    } catch (catErr) {
+      await conn.execute(`INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId]);
+    }
+
+    // === FIX: allow group linking for ANY category, not only Fnd ===
+    if (group_ids && Array.isArray(group_ids) && group_ids.length > 0) {
+      for (const gid of group_ids) {
+        const gmId = `gm_${Date.now()}_${Math.random().toString(36).substr(2,5)}_${gid.substr(0,4)}`;
+        try {
+          await conn.execute(`INSERT INTO group_members (id, group_id, profile_id, owner_user_id, role) VALUES (?,?,?,?,?)`, [gmId, gid, finalId, owner_user_id, 'member']);
+          await conn.execute(`UPDATE profile_groups SET member_count = (SELECT COUNT(*) FROM group_members WHERE group_id=?) WHERE id=?`, [gid, gid]);
+        } catch(e) { console.log("group insert skip:", e.message); }
+      }
+    }
+
+    if (me && finalCategory === 'Fml') {
       if (finalRelation === 'Father') {
         await conn.query(`UPDATE profiles SET father_id=? WHERE id=?`, [finalId, myId]);
         if (me.father_id) await conn.query(`UPDATE profiles SET father_id=? WHERE father_id=? AND id!=?`, [finalId, me.father_id, finalId]);
@@ -578,7 +630,7 @@ app.post('/api/profiles', async (req, res) => {
       }
     }
     await conn.commit();
-    res.json({ success: true, id: finalId, father_id: newFatherId, mother_id: newMotherId });
+    res.json({ success: true, id: finalId, father_id: newFatherId, mother_id: newMotherId, category: finalCategory });
   } catch (err) {
     await conn.rollback();
     res.status(500).json({ error: err.message });
@@ -603,6 +655,98 @@ app.post('/api/relations', async (req, res) => {
     if (!owner_profile_id ||!related_profile_id ||!relation_type) return res.status(400).json({ error: "owner_profile_id, related_profile_id, relation_type required" });
     await pool.execute("INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group) VALUES (?,?,?,?,?)", [finalId, owner_profile_id, related_profile_id, relation_type, spouse_group || null]);
     res.json({ success: true, id: finalId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/profile-groups', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { owner_user_id } = req.query;
+    if (!owner_user_id) return res.status(400).json({ error: "owner_user_id required" });
+    const [rows] = await pool.query('SELECT * FROM profile_groups WHERE owner_user_id=? ORDER BY created_at DESC', [owner_user_id]);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/profile-groups', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { id, name, description, owner_user_id, image_url } = req.body;
+    if (!name ||!owner_user_id) return res.status(400).json({ error: "name and owner_user_id required" });
+    const finalId = id || `grp_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+    const inviteCode = Math.random().toString(36).substr(2,6).toUpperCase();
+    await pool.execute(`INSERT INTO profile_groups (id, name, description, image_url, owner_user_id, invite_code, member_count) VALUES (?,?,?,?,?,?,0)`, [finalId, name, description || null, image_url || null, owner_user_id, inviteCode]);
+    res.json({ success: true, id: finalId, invite_code: inviteCode });
+  } catch (err) {
+    if (err.message.includes('Duplicate')) return res.status(400).json({ error: "Group name already exists" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/profile-groups/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    await pool.query("SET FOREIGN_KEY_CHECKS=0");
+    await pool.query('DELETE FROM group_members WHERE group_id=?', [req.params.id]);
+    await pool.query('DELETE FROM profile_groups WHERE id=?', [req.params.id]);
+    await pool.query("SET FOREIGN_KEY_CHECKS=1");
+    res.json({ success: true });
+  } catch (err) {
+    try { await pool.query("SET FOREIGN_KEY_CHECKS=1"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/group-members', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { group_id, owner_user_id } = req.query;
+    if (group_id) {
+      const [rows] = await pool.query(`
+        SELECT gm.*, p.display_name, p.photo_url, p.category, p.id as profile_id
+        FROM group_members gm
+        JOIN profiles p ON gm.profile_id = p.id
+        WHERE gm.group_id=?`, [group_id]);
+      return res.json(rows);
+    }
+    if (owner_user_id) {
+      // === FIX: return ALL profiles owned, not only Fnd ===
+      const [rows] = await pool.query(`
+        SELECT p.*, GROUP_CONCAT(gm.group_id) as group_ids
+        FROM profiles p
+        LEFT JOIN group_members gm ON p.id = gm.profile_id
+        WHERE p.owner_user_id=?
+        GROUP BY p.id`, [owner_user_id]);
+      return res.json(rows);
+    }
+    res.json([]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/group-members', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const { group_id, profile_id, owner_user_id } = req.body;
+    if (!group_id ||!profile_id ||!owner_user_id) return res.status(400).json({ error: "group_id, profile_id, owner_user_id required" });
+    const gmId = `gm_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+    await pool.execute(`INSERT INTO group_members (id, group_id, profile_id, owner_user_id) VALUES (?,?,?,?)`, [gmId, group_id, profile_id, owner_user_id]);
+    await pool.execute(`UPDATE profile_groups SET member_count = (SELECT COUNT(*) FROM group_members WHERE group_id=?) WHERE id=?`, [group_id, group_id]);
+    // === FIX: don't change category when adding to group ===
+    res.json({ success: true, id: gmId });
+  } catch (err) {
+    if (err.message.includes('Duplicate')) return res.status(400).json({ error: "Already in group" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/group-members/:id', async (req, res) => {
+  if (!pool) return res.status(500).json({ error: "DB not connected" });
+  try {
+    const [row] = await pool.query('SELECT group_id FROM group_members WHERE id=?', [req.params.id]);
+    const groupId = row[0]?.group_id;
+    await pool.query('DELETE FROM group_members WHERE id=?', [req.params.id]);
+    if (groupId) await pool.query(`UPDATE profile_groups SET member_count = (SELECT COUNT(*) FROM group_members WHERE group_id=?) WHERE id=?`, [groupId, groupId]);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

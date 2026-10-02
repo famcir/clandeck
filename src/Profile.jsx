@@ -331,7 +331,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const Node = ({ p, big }) => {
     if (!p) return null;
     const hasPhoto = p.photo_url && p.photo_url.trim()!== '';
-    const initial = (p.display_name || '?').trim().CharAt? (p.display_name || '?').trim().charAt(0).toUpperCase() : (p.display_name || '?').trim().charAt(0).toUpperCase();
+    const initial = (p.display_name || '?').trim().charAt(0).toUpperCase();
     return (
       <div onClick={() => p && handleMemberPhotoClick(p)} className="flex flex-col items-center cursor-pointer group relative shrink-0 hover:scale-105 transition-transform">
         <div className={`${big? 'tree-node-big' : 'tree-node'} rounded-[8px] border flex items-center justify-center overflow-hidden shrink-0 ${big? 'bg-[#c9ad83] text-white' : 'bg-[#f8f5f0] text-[#5a4a32]'}`}>
@@ -363,19 +363,33 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
 .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
       `}</style>
-      <header className="h-[68px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-6 justify-between sticky top-0 z-20 w-full">
-        <div className="flex items-center gap-3">
-          <img src={logo} alt="Clandeck" className="h-[44px] md:h-[60px] w-auto object-contain" />
-          <button onClick={goDeck} className="ml-2 px-4 h-8 bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Deck</button>
+
+      {/* 78px HEADER - WITH SEARCH + NOTIFICATION - MOBILE FRIENDLY */}
+      <header className="h-[78px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-5 justify-between sticky top-0 z-20 w-full">
+        <div className="flex items-center gap-2 md:gap-3">
+          <img src={logo} alt="Clandeck" className="h-[36px] md:h-[42px] w-auto object-contain" />
+          <button onClick={goDeck} className="px-3 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] md:text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Deck</button>
           {isViewingOther && (
-            <button onClick={handleBackToMyTree} className="ml-2 px-4 h-8 bg-[#efe8d3] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold">← {self?.display_name?.split(' ')[0]}'s Tree</button>
+            <button onClick={handleBackToMyTree} className="hidden md:flex px-3 h-8 bg-[#efe8d3] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold items-center">← {self?.display_name?.split(' ')[0]}'s Tree</button>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={onLogout} className="px-4 h-8 bg-[#6b5a45] text-white rounded-[4px] text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Logout</button>
-          {self?.photo_url? <img src={self.photo_url} className="w-9 h-9 rounded-[4px] object-cover border border-[#e9e2d6]" alt="" /> : <div className="w-9 h-9 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[12px] font-bold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
+        <div className="hidden lg:flex items-center gap-6 text-[13px] font-bold text-[#5a4a32] absolute left-1/2 -translate-x-1/2">
+          <span className="opacity-40">Family Tree</span>
+          <span className="text-black border-b-2 border-black pb-0.5">Profile</span>
+        </div>
+        <div className="flex items-center gap-2 md:gap-3">
+          <button className="w-8 h-8 md:w-9 md:h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] flex items-center justify-center hover:bg-[#efe8d3] transition-colors">
+            <svg className="w-4 h-4 text-[#5a4a32]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M21 21l-4.3-4.3"/></svg>
+          </button>
+          <button className="w-8 h-8 md:w-9 md:h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] flex items-center justify-center hover:bg-[#efe8d3] transition-colors relative">
+            <svg className="w-4 h-4 text-[#5a4a32]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 7 6 5 6 9H0s6-2 6-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+          </button>
+          <button onClick={onLogout} className="px-3 md:px-4 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] md:text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Logout</button>
+          {self?.photo_url? <img src={self.photo_url} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] object-cover border border-[#e9e2d6]" alt="" /> : <div className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[11px] font-bold">{(self?.display_name?.[0] || '?').toUpperCase()}</div>}
         </div>
       </header>
+
       <div className="grid grid-cols-12 gap-4 p-4 w-full">
         <div className="col-span-12 lg:col-span-3 card p-6">
           <div className="text-center">
@@ -465,9 +479,9 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-extrabold text-[16px]">
                 {editingFamilyId
-            ? 'Edit Family Member'
+          ? 'Edit Family Member'
                   : isViewingOther
-              ? `Add ${activeSelf?.display_name}'s Family Member`
+            ? `Add ${activeSelf?.display_name}'s Family Member`
                     : 'Add Family Member'}
               </h3>
               <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); }} className="w-8 h-8 bg-gray-100 rounded-[4px]">✕</button>
@@ -475,7 +489,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="space-y-3">
               <p className="text-[11px] text-gray-500">
                 {isViewingOther &&!editingFamilyId
-            ? `Adding to ${activeSelf?.display_name}'s family tree`
+          ? `Adding to ${activeSelf?.display_name}'s family tree`
                   : "Add a new member to family tree"}
               </p>
               <select value={newRelation} onChange={e=>setNewRelation(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px] font-bold">
