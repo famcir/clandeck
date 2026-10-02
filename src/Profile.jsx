@@ -29,6 +29,11 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   const [activeTree, setActiveTree] = useState(null);
   const [activeRelations, setActiveRelations] = useState([]);
 
+  // ADDED FOR DECK STYLE UNLIMITED
+  const [treeDepth, setTreeDepth] = useState(0);
+  const [extendedTree, setExtendedTree] = useState([]);
+  const onlyFml = (arr) => (arr||[]).filter(p =>!p.category || p.category === 'Fml');
+
   const [editForm, setEditForm] = useState({
     display_name: '',
     bio: '',
@@ -87,6 +92,42 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     }, 300);
     return ()=>clearTimeout(timer);
   }, [newName, editingFamilyId, activeSelf?.id, self?.id, currentUserId]);
+
+  // UNLIMITED EXTENDED TREE - SAME AS DECK.JSX
+  useEffect(()=>{
+    const sourceForBFS = activeTree || profiles;
+    const base = sourceForBFS.filter(p =>
+      p.id === activeSelf?.father_id ||
+      p.id === activeSelf?.mother_id ||
+      p.id === activeSelf?.id ||
+      (activeSelf?.father_id && p.father_id === activeSelf?.father_id) ||
+      (activeSelf?.mother_id && p.mother_id === activeSelf?.mother_id) ||
+      p.father_id === activeSelf?.id || p.mother_id === activeSelf?.id ||
+      (activeRelations||[]).filter(r=>r.relation_type==='Spouse').map(r=>r.related_profile_id).includes(p.id)
+    );
+    const baseList = base.length>0? base : sourceForBFS;
+    if(treeDepth === 0){ setExtendedTree([]); return; }
+    if(baseList.length === 0) return;
+    const run = async () => {
+      let all = [...baseList];
+      let visited = new Set(baseList.map(p=>p.id));
+      let queue = [...baseList.map(p=>p.id)];
+      let depth = 0;
+      while(queue.length>0 && depth < treeDepth){
+        const results = await Promise.all(queue.map(id=> fetch(`/api/family-tree/${id}`).then(r=>r.json()).catch(()=>[])));
+        const flat = results.flat().filter(Boolean);
+        const fmlOnly = onlyFml(flat);
+        const newOnes = fmlOnly.filter(p=>p?.id &&!visited.has(p.id));
+        newOnes.forEach(p=>visited.add(p.id));
+        all = [...all,...newOnes];
+        queue = newOnes.map(p=>p.id);
+        depth++;
+      }
+      const unique = Array.from(new Map(all.map(p=>[p.id,p])).values());
+      setExtendedTree(unique);
+    };
+    run();
+  },[treeDepth, activeTree, profiles, activeSelf?.id]);
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
@@ -307,6 +348,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     setViewProfileData(null);
     setActiveTree(null);
     setActiveRelations([]);
+    setTreeDepth(0);
   };
 
   const goDeck = () => { if (onDeck) onDeck(); else if (onBack) onBack(); };
@@ -334,12 +376,12 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
     const initial = (p.display_name || '?').trim().charAt(0).toUpperCase();
     return (
       <div onClick={() => p && handleMemberPhotoClick(p)} className="flex flex-col items-center cursor-pointer group relative shrink-0 hover:scale-105 transition-transform">
-        <div className={`${big? 'tree-node-big' : 'tree-node'} rounded-[8px] border flex items-center justify-center overflow-hidden shrink-0 ${big? 'bg-[#c9ad83] text-white' : 'bg-[#f8f5f0] text-[#5a4a32]'}`}>
-          {hasPhoto? <img src={p.photo_url} className="w-full h-full rounded-[8px] object-cover" alt={p.display_name} /> : <span className="font-extrabold text-[clamp(14px,3cqw,22px)]">{initial}</span>}
+        <div className={`${big? 'w-[76px] h-[76px] text-[22px] bg-[#c9ad83] text-white' : 'w-[64px] h-[64px] bg-[#f8f5f0] text-[#5a4a32]'} rounded-[8px] border flex items-center justify-center overflow-hidden shrink-0 hover:ring-2 hover:ring-black`}>
+          {hasPhoto? <img src={p.photo_url} className="w-full h-full rounded-[8px] object-cover" alt={p.display_name} /> : <span className="font-extrabold text-[16px]">{initial}</span>}
         </div>
         <div className="mt-1 flex flex-col items-center text-center leading-none">
-          <p className="tree-label font-bold max-w-[64px] truncate">{p.display_name}</p>
-          {big && <span className="tree-label font-bold">(you)</span>}
+          <p className="text-[10px] font-bold max-w-[64px] truncate">{p.display_name?.split(' ')[0]}</p>
+          {big && <span className="text-[10px] font-bold">(you)</span>}
           {!big && (
             <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition">
               <button onClick={(e)=>{e.stopPropagation(); handleEdit(p)}} className="text-[8px] bg-black text-white px-1.5 py-0.5 rounded-[4px]">Edit</button>
@@ -352,6 +394,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
   };
 
   const firstName = activeSelf?.display_name?.split(' ')[0] || 'Member';
+  const allProfiles = extendedTree.length>0? extendedTree : sourceProfiles;
 
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{ fontFamily: 'Plus Jakarta Sans' }}>
@@ -362,9 +405,12 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
 .tree-node{ width: clamp(44px, 8.5cqw, 62px); height: clamp(44px, 8.5cqw, 62px); font-size: clamp(16px, 3.5cqw, 22px); }
 .tree-node-big{ width: clamp(58px, 11cqw, 76px); height: clamp(58px, 11cqw, 76px); font-size: clamp(20px, 4cqw, 26px); }
 .tree-label{ font-size: clamp(8px, 2cqw, 11px); }
+.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0;-webkit-overflow-scrolling:touch}
+.family-scroll::-webkit-scrollbar{width:8px;height:8px}
+.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}
+.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}
       `}</style>
 
-      {/* 78px HEADER - WITH SEARCH + NOTIFICATION - MOBILE FRIENDLY */}
       <header className="h-[78px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-5 justify-between sticky top-0 z-20 w-full">
         <div className="flex items-center gap-2 md:gap-3">
           <img src={logo} alt="Clandeck" className="h-[36px] md:h-[42px] w-auto object-contain" />
@@ -440,28 +486,89 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
         <div className="col-span-12 lg:col-span-6 flex flex-col gap-0">
           <div className="bg-[#efe8d3] border border-[#e9e2d6] border-b-0 rounded-t-[10px] p-4 flex justify-between items-center">
             <h2 className="font-extrabold text-[13px]">{isViewingOther? `${activeSelf?.display_name}'s Family Tree` : "My Family Tree"}</h2>
-            <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); setShowAddmodel(true); }} className="px-4 py-1.5 bg-black text-white rounded-[4px] text-[11px] font-bold">
-              {isViewingOther? `+ Add ${firstName}'s Family Member` : "+ Add Family Member"}
-            </button>
-          </div>
-          <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] rounded-t-none p-6">
-            <div className="w-full flex justify-center">
-              <div className="relative w-full overflow-hidden" style={{ maxWidth: '520px', height: 'clamp(360px, 40vw, 440px)', containerType: 'inline-size' }}>
-                <div className="absolute left-1/2 -translate-x-1/2 top-[2%] flex gap-[2px] z-10">
-                  {father && <Node p={father} />}
-                  {mother && <Node p={mother} />}
-                </div>
-                <div className="absolute left-1/2 -translate-x-1/2 top-[38%] flex items-center gap-[12px]">
-                  {spouse && <Node p={spouse} />}
-                  <Node p={activeSelf} big />
-                </div>
-                <div className="absolute right-[4%] top-[18%] flex gap-[2px] max-w-[36%] flex-wrap justify-end">
-                  {siblingsFixed.map(s => <Node key={s.id} p={s} />)}
-                </div>
-                <div className="absolute left-[47%] bottom-[5%] -translate-x-1/2 flex gap-[2px] justify-center">
-                  {children.map(c => <Node key={c.id} p={c} />)}
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-white rounded-full border border-[#e9e2d6] px-1 py-1">
+                <button onClick={()=>setTreeDepth(d=>Math.max(0,d-1))} disabled={treeDepth===0} className="w-6 h-6 rounded-full bg-black text-white text-[12px] font-bold flex items-center justify-center disabled:opacity-30">−</button>
+                <span className="text-[10px] font-bold px-1">L{treeDepth}</span>
+                <button onClick={()=>setTreeDepth(d=>Math.min(10,d+1))} disabled={treeDepth===10} className="w-6 h-6 rounded-full bg-black text-white text-[12px] font-bold flex items-center justify-center disabled:opacity-30">+</button>
               </div>
+              <button onClick={() => { setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); setShowAddmodel(true); }} className="px-3 py-1.5 bg-black text-white rounded-[4px] text-[10px] font-bold">
+                {isViewingOther? `+ Add ${firstName}'s Member` : "+ Add Member"}
+              </button>
+            </div>
+          </div>
+          <div className="bg-[#fffefb] border border-[#e9e2d6] rounded-b-[10px] p-0 overflow-hidden">
+            <div className="family-scroll">
+              {treeDepth===0? (
+                (() => {
+                  const hasParents =!!(father || mother);
+                  const hasSibs = siblingsFixed.length>0;
+                  let minLeft = 562;
+                  if(father) minLeft = Math.min(minLeft, 520);
+                  if(mother) minLeft = Math.min(minLeft, 616);
+                  if(hasSibs) minLeft = Math.min(minLeft, 440 - (siblingsFixed.length-1)*100);
+                  if(spouse) minLeft = Math.min(minLeft, 670, 622);
+                  else minLeft = Math.min(minLeft, 568);
+                  let minTop = 312;
+                  if(hasParents) minTop = 180;
+                  else if(hasSibs) minTop = 246;
+                  const shiftX = minLeft - 20;
+                  const shiftY = minTop - 20;
+                  const canvasW = Math.max(500, 180 + siblingsFixed.length*110 + children.length*80) + 64;
+                  const canvasH = hasParents? 552 : (hasSibs? 420 : 360);
+                  const isSingle = sourceProfiles.length<=1;
+                  if(isSingle){
+                    return (<div className="flex items-center justify-center w-full h-[400px]"><Node p={activeSelf} big /></div>);
+                  }
+                  return (
+                    <div className="relative" style={{width:`${canvasW}px`,height:`${canvasH}px`,minWidth:'500px', marginLeft:'0', marginRight:'auto', overflow:'visible'}}>
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:0, overflow:'visible'}}>
+                        {father && mother && <line x1={584-shiftX} y1={212-shiftY} x2={616-shiftX} y2={212-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
+                        {(father || mother) && <line x1={600-shiftX} y1={212-shiftY} x2={600-shiftX} y2={312-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
+                        {activeSelf && spouse && <line x1={638-shiftX} y1={352-shiftY} x2={670-shiftX} y2={352-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
+                        {activeSelf && spouse && children.length>0 && <line x1={654-shiftX} y1={352-shiftY} x2={654-shiftX} y2={444-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>}
+                        {siblingsFixed.length>1 && (
+                          <>
+                            <line x1={472-shiftX} y1={236-shiftY} x2={472 - (siblingsFixed.length-1)*100 - shiftX} y2={236-shiftY} stroke="#c9ad83" strokeWidth="1.2"/>
+                            {siblingsFixed.map((_,i)=> <line key={`s-${i}`} x1={472 - i*100 - shiftX} y1={236-shiftY} x2={472 - i*100 - shiftX} y2={246-shiftY} stroke="#c9ad83" strokeWidth="1.2"/>)}
+                          </>
+                        )}
+                        {siblingsFixed.length>0 && (
+                          <>
+                            <line x1={600-shiftX} y1={285-shiftY} x2={504-shiftX} y2={285-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>
+                            <line x1={504-shiftX} y1={278-shiftY} x2={504-shiftX} y2={285-shiftY} stroke="#c9ad83" strokeWidth="1.5"/>
+                          </>
+                        )}
+                      </svg>
+                      {father && mother && <div className="absolute" style={{left:`${593-shiftX}px`,top:`${190-shiftY}px`,zIndex:3,fontSize:'10px'}}>❤️</div>}
+                      {activeSelf && spouse && <div className="absolute" style={{left:`${647-shiftX}px`,top:`${330-shiftY}px`,zIndex:3,fontSize:'10px'}}>❤️</div>}
+                      <div className="absolute" style={{left:`${520-shiftX}px`,top:`${180-shiftY}px`,zIndex:3}}>{father && <Node p={father} />}</div>
+                      <div className="absolute" style={{left:`${616-shiftX}px`,top:`${180-shiftY}px`,zIndex:3}}>{mother && <Node p={mother} />}</div>
+                      {siblingsFixed.map((s, idx) => (
+                        <div key={s.id} className="absolute" style={{left:`${440 - idx*100 - shiftX}px`, top:`${246-shiftY}px`,zIndex:3}}>
+                          <Node p={s} />
+                        </div>
+                      ))}
+                      <div className="absolute" style={{left:`${562-shiftX}px`,top:`${312-shiftY}px`,zIndex:3}}><Node p={activeSelf} big /></div>
+                      <div className="absolute" style={{left:`${670-shiftX}px`,top:`${320-shiftY}px`,zIndex:3}}>{spouse && <Node p={spouse} />}</div>
+                      <div className="absolute flex" style={{left: spouse? `${622-shiftX}px` : `${568-shiftX}px`, top:`${444-shiftY}px`, gap:'16px', flexWrap:'nowrap', zIndex:3}}>
+                        {children.map(c=> (
+                          <div key={c.id} style={{width:'64px', flexShrink:0}}>
+                            <Node p={c} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <div style={{width:'1200px',minWidth:'1200px',minHeight:'540px',padding:'20px'}}>
+                  <p className="text-[10px] text-gray-500 mb-3">Level {treeDepth} - Unlimited tree ({allProfiles.length} members) - includes Govindan's siblings like Shivan Nair</p>
+                  <div className="flex flex-wrap gap-5">
+                    {allProfiles.map(p=><Node key={p.id} p={p} />)}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -479,9 +586,9 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-extrabold text-[16px]">
                 {editingFamilyId
-          ? 'Edit Family Member'
+         ? 'Edit Family Member'
                   : isViewingOther
-            ? `Add ${activeSelf?.display_name}'s Family Member`
+           ? `Add ${activeSelf?.display_name}'s Family Member`
                     : 'Add Family Member'}
               </h3>
               <button onClick={()=>{ setShowAddmodel(false); setEditingFamilyId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedSpouseForChild(''); setSearchResults([]); setSelectedExistingId(null); }} className="w-8 h-8 bg-gray-100 rounded-[4px]">✕</button>
@@ -489,7 +596,7 @@ export default function Profile({ onEdit, onLogout, onDeck, onBack }) {
             <div className="space-y-3">
               <p className="text-[11px] text-gray-500">
                 {isViewingOther &&!editingFamilyId
-          ? `Adding to ${activeSelf?.display_name}'s family tree`
+         ? `Adding to ${activeSelf?.display_name}'s family tree`
                   : "Add a new member to family tree"}
               </p>
               <select value={newRelation} onChange={e=>setNewRelation(e.target.value)} className="w-full h-10 bg-[#f8f5f0] rounded-[8px] px-3 text-[12px] font-bold">

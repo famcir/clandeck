@@ -59,17 +59,107 @@ export default function AddFamilyModel({ selfId, currentUserId, onClose, onAdded
         });
       }
 
-      // 3. Create link in profile_relations
-      await fetch(`${API_BASE}/api/relations`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          owner_profile_id: selfId,
-          related_profile_id: profileId,
-          relation_type: relation === 'wife'? 'Spouse' : relation,
-          spouse_group: relation === 'Child'? spouseGroup : null
-        })
-      });
+      // 3. Create link in profile_relations - UNLIMITED FIX FOR SIBLING
+      if (relation === 'Sibling') {
+        // Find parents of selfId (Govindan Nair)
+        let parentIds = { father: null, mother: null };
+        try {
+          const famRes = await fetch(`${API_BASE}/api/family-tree/${selfId}`);
+          const famData = await famRes.json();
+          if (Array.isArray(famData)) {
+            const father = famData.find(p => p.computed_relation === 'Father' || p.relation_type === 'Father');
+            const mother = famData.find(p => p.computed_relation === 'Mother' || p.relation_type === 'Mother');
+            if (father) parentIds.father = father.id;
+            if (mother) parentIds.mother = mother.id;
+          }
+        } catch(e) { console.log('no parents found for sibling', e); }
+
+        // If parents exist, link new sibling to same parents (so unlimited chain works)
+        if (parentIds.father) {
+          await fetch(`${API_BASE}/api/relations`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+              owner_profile_id: profileId,
+              related_profile_id: parentIds.father,
+              relation_type: 'Father',
+              spouse_group: null
+            })
+          });
+        }
+        if (parentIds.mother) {
+          await fetch(`${API_BASE}/api/relations`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+              owner_profile_id: profileId,
+              related_profile_id: parentIds.mother,
+              relation_type: 'Mother',
+              spouse_group: null
+            })
+          });
+        }
+
+        // Create Sibling link both ways for direct display when viewing Govindan
+        await fetch(`${API_BASE}/api/relations`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            owner_profile_id: selfId,
+            related_profile_id: profileId,
+            relation_type: 'Sibling',
+            spouse_group: null
+          })
+        });
+        await fetch(`${API_BASE}/api/relations`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            owner_profile_id: profileId,
+            related_profile_id: selfId,
+            relation_type: 'Sibling',
+            spouse_group: null
+          })
+        });
+      } else {
+        // Normal flow for Father, Mother, wife, Child
+        await fetch(`${API_BASE}/api/relations`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            owner_profile_id: selfId,
+            related_profile_id: profileId,
+            relation_type: relation === 'wife'? 'Spouse' : relation,
+            spouse_group: relation === 'Child'? spouseGroup : null
+          })
+        });
+
+        // For unlimited: also create reverse link for Father/Mother/Child
+        if (relation === 'Father' || relation === 'Mother') {
+          await fetch(`${API_BASE}/api/relations`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+              owner_profile_id: profileId,
+              related_profile_id: selfId,
+              relation_type: 'Child',
+              spouse_group: null
+            })
+          });
+        }
+        if (relation === 'Child') {
+          await fetch(`${API_BASE}/api/relations`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+              owner_profile_id: profileId,
+              related_profile_id: selfId,
+              relation_type: selfId? 'Father' : 'Child',
+              spouse_group: null
+            })
+          });
+        }
+      }
 
       onAdded();
       onClose();

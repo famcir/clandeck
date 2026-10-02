@@ -49,7 +49,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     ]
   });
 
-  // CHAT STATE - NEW
   const [chatOpen, setChatOpen] = useState(false);
   const [chatWith, setChatWith] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
@@ -136,25 +135,36 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     setGroupMembersMap({});
   }, [displayProfile]);
 
+  // --- UNLIMITED LEVEL FIX ---
   useEffect(()=>{
     if(treeDepth === 0){ setExtendedTree([]); return; }
     const base = treeProfiles;
     if(base.length === 0) return;
-    const ids = [...new Set([...base.map(p=>p.id)])];
-    Promise.all(ids.map(id=> fetch(`/api/family-tree/${id}`).then(r=>r.json()).catch(()=>[])))
-.then(results=>{
+    const run = async () => {
+      let all = [...base];
+      let visited = new Set(base.map(p=>p.id));
+      let queue = [...base.map(p=>p.id)];
+      let depth = 0;
+      while(queue.length>0 && depth < treeDepth){
+        const results = await Promise.all(queue.map(id=> fetch(`/api/family-tree/${id}`).then(r=>r.json()).catch(()=>[])));
         const flat = results.flat().filter(Boolean);
-        const merged = [...base,...flat];
-        const unique = Array.from(new Map(merged.map(p=>[p.id,p])).values());
-        setExtendedTree(onlyFml(unique));
-      });
+        const fmlOnly = onlyFml(flat);
+        const newOnes = fmlOnly.filter(p=>p?.id &&!visited.has(p.id));
+        newOnes.forEach(p=>visited.add(p.id));
+        all = [...all,...newOnes];
+        queue = newOnes.map(p=>p.id);
+        depth++;
+      }
+      const unique = Array.from(new Map(all.map(p=>[p.id,p])).values());
+      setExtendedTree(unique);
+    };
+    run();
   },[treeDepth, treeProfiles]);
 
   useEffect(() => {
     try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch(e) {}
   }, []);
 
-  // CHAT - NEW effects
   const openChat = (profile) => {
     if(!profile) return;
     setChatWith(profile);
@@ -402,7 +412,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
                 <div className="flex items-center gap-1 bg-white rounded-full border border-[#e9e2d6] px-1 py-1">
                   <button onClick={()=>setTreeDepth(d=>Math.max(0,d-1))} disabled={treeDepth===0} className="w-6 h-6 rounded-full bg-black text-white text-[14px] font-bold flex items-center justify-center disabled:opacity-30">−</button>
                   <span className="text-[10px] font-bold px-1">L{treeDepth}</span>
-                  <button onClick={()=>setTreeDepth(d=>Math.min(2,d+1))} disabled={treeDepth===2} className="w-6 h-6 rounded-full bg-black text-white text-[14px] font-bold flex items-center justify-center disabled:opacity-30">+</button>
+                  <button onClick={()=>setTreeDepth(d=>Math.min(10,d+1))} disabled={treeDepth===10} className="w-6 h-6 rounded-full bg-black text-white text-[14px] font-bold flex items-center justify-center disabled:opacity-30">+</button>
                 </div>
                 <span className="text-[11px] bg-white px-3 py-1 rounded-full font-bold border border-[#e9e2d6]">{displayCount} Members</span>
               </div>
@@ -493,21 +503,9 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
                       </div>
                     );
                   })()
-                ) : treeDepth===1? (
-                  <div className="relative" style={{width:'1200px',height:'520px',minWidth:'1200px', overflow:'visible'}}>
-                    <div className="absolute flex gap-6" style={{left:'20px',top:'10px',flexWrap:'wrap',maxWidth:'1100px'}}>
-                      {allProfiles.filter(p=>p.computed_relation==='Father').map(p=><Node key={p.id} p={p} />)}
-                    </div>
-                    <div className="absolute flex gap-6" style={{left:'20px',top:'180px',flexWrap:'wrap',maxWidth:'1100px'}}>
-                      {allProfiles.filter(p=>['Self','Sibling','Spouse','Mother'].includes(p.computed_relation)).map(p=><Node key={p.id} p={p} />)}
-                    </div>
-                    <div className="absolute flex gap-6" style={{left:'20px',top:'380px',flexWrap:'wrap',maxWidth:'1100px'}}>
-                      {allProfiles.filter(p=>p.computed_relation==='Child').map(p=><Node key={p.id} p={p} />)}
-                    </div>
-                  </div>
                 ) : (
                   <div style={{width:'1200px',minWidth:'1200px',minHeight:'540px',padding:'20px'}}>
-                    <p className="text-[10px] text-gray-500 mb-3">Level 2 - Full joined tree ({allProfiles.length} members)</p>
+                    <p className="text-[10px] text-gray-500 mb-3">Level {treeDepth} - Unlimited tree ({allProfiles.length} members)</p>
                     <div className="flex flex-wrap gap-5">
                       {allProfiles.map(p=><Node key={p.id} p={p} />)}
                     </div>
@@ -600,7 +598,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         </div>
       </div>
 
-      {/* CHAT - NEW */}
       {!chatOpen && (
         <button onClick={()=>displayProfile && openChat(displayProfile)}
           className="fixed bottom-4 right-4 w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shadow-xl z-50 hover:scale-105 transition-transform">
