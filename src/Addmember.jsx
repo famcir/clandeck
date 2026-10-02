@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import logo from './assets/clandeck_h.png';
 
-export default function Members({ onGoProfile, onGoDeck, onLogout }) {
+export default function Members({ onGoProfile, onGoDeck, onGoGroups, onLogout }) {
   const currentUserId = localStorage.getItem('userId') || 'ur001';
+  const [allProfiles, setAllProfiles] = useState([]);
   const [members, setMembers] = useState([]);
   const [groups, setGroups] = useState([]);
   const [groupMembers, setGroupMembers] = useState([]);
@@ -39,13 +40,20 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
       const g = await fetch(`/api/profile-groups?owner_user_id=${currentUserId}`).then(r=>r.json()).catch(()=>[]);
       setGroups(Array.isArray(g)? g : []);
 
-      const fnd = await fetch(`/api/group-members?owner_user_id=${currentUserId}`).then(r=>r.json()).catch(()=>[]);
-      setMembers(Array.isArray(fnd)? fnd : []);
+      const allProf = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).catch(()=>[]);
+      const arr = Array.isArray(allProf)? allProf : [];
+      setAllProfiles(arr);
+      setMembers(arr.filter(p => p.category === 'Fnd'));
 
       const allGms = [];
       for (const grp of (Array.isArray(g)? g : [])) {
         const gm = await fetch(`/api/group-members?group_id=${grp.id}`).then(r=>r.json()).catch(()=>[]);
-        allGms.push(...(Array.isArray(gm)? gm : []));
+        const list = Array.isArray(gm)? gm : [];
+        // attach group_id if missing
+        list.forEach(item => {
+          if (!item.group_id) item.group_id = grp.id;
+        });
+        allGms.push(...list);
       }
       setGroupMembers(allGms);
     } catch(e) { console.log(e); }
@@ -60,13 +68,13 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
       try {
         const res = await fetch(`/api/profiles?owner_user_id=${currentUserId}&search=${encodeURIComponent(q)}`);
         const data = await res.json();
-        const filtered = (data||[]).filter(p =>!members.some(m => m.id === p.id) && p.id!== currentUserId);
+        const filtered = (data||[]).filter(p => p.id!== currentUserId);
         setSearchResults(filtered.slice(0,20));
       } catch { setSearchResults([]); }
       setSearching(false);
     }, 300);
     return () => clearTimeout(t);
-  }, [newName, editingId]);
+  }, [newName, editingId, currentUserId]);
 
   const handlePhoto = (e) => {
     const f = e.target.files[0];
@@ -112,16 +120,14 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
     setSaving(true);
     try {
       let profileId = editingId || selectedExistingId;
-
       if (editingId) {
-        if (await checkOwnership(editingId)) return alert('Ownership accepted - cannot edit');
-        let photoUrl = members.find(m=>m.id===editingId)?.photo_url || '';
+        if (await checkOwnership(editingId)) { setSaving(false); return alert('Ownership accepted - cannot edit'); }
+        let photoUrl = allProfiles.find(m=>m.id===editingId)?.photo_url || '';
         if (newPhoto) {
           const fd = new FormData(); fd.append('file', newPhoto);
           const up = await fetch(`/api/upload?profileId=${editingId}`, {method:'POST', body: fd}).then(r=>r.json());
           photoUrl = up.url || photoUrl;
         }
-        // === FIX: don't force category to Fnd on edit, keep original ===
         await fetch(`/api/profiles/${editingId}`, {
           method:'PUT',
           headers:{'Content-Type':'application/json'},
@@ -136,8 +142,6 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
         }
       } else if (selectedExistingId) {
         profileId = selectedExistingId;
-        // === FIX: DON'T change category to Fnd for family members ===
-        // keep Fml so it stays in family tree
         for (const gid of selectedGroups) {
           await fetch('/api/group-members', {
             method:'POST',
@@ -163,7 +167,13 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Add failed');
         profileId = data.id;
-
+        for (const gid of selectedGroups) {
+          await fetch('/api/group-members', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ group_id: gid, profile_id: profileId, owner_user_id: currentUserId })
+          }).catch(()=>{});
+        }
         if (newPhoto) {
           const fd = new FormData(); fd.append('file', newPhoto);
           const up = await fetch(`/api/upload?profileId=${profileId}`, {method:'POST', body: fd}).then(r=>r.json());
@@ -174,7 +184,6 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
           });
         }
       }
-
       await loadAll();
       setShowModal(false);
       setEditingId(null); setNewName(''); setNewBio(''); setNewPhoto(null); setNewPreview(''); setSelectedGroups([]); setNewGroupName(''); setSelectedExistingId(null); setSearchResults([]);
@@ -188,8 +197,8 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
     setNewBio(m.bio || '');
     setNewPreview(m.photo_url || '');
     setNewPhoto(null);
-    const gids = m.group_ids? m.group_ids.split(',') : [];
-    const extra = groupMembers.filter(gm=> gm.profile_id===m.id).map(gm=> gm.group_id);
+    const gids = m.group_ids? m.group_ids.split(',').filter(Boolean) : [];
+    const extra = groupMembers.filter(gm=> (gm.profile_id||gm.id)===m.id).map(gm=> gm.group_id);
     setSelectedGroups([...new Set([...gids,...extra])]);
     setSelectedExistingId(null);
     setShowModal(true);
@@ -199,7 +208,7 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
     if (!confirm('Delete this member?')) return;
     if (await checkOwnership(id)) return alert('Ownership accepted - cannot delete');
     await fetch(`/api/profiles/${id}?deleterId=${currentUserId}`, {method:'DELETE'}).catch(()=>{});
-    setMembers(prev=> prev.filter(p=> p.id!==id));
+    setAllProfiles(prev=> prev.filter(p=> p.id!==id));
     loadAll();
   };
 
@@ -225,22 +234,49 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
     setSharing(null);
   };
 
-  const filteredMembers = members.filter(m => {
-    const matchesSearch =!searchQ || m.display_name?.toLowerCase().includes(searchQ.toLowerCase());
-    const gids = m.group_ids? m.group_ids.split(',') : [];
-    const extraGids = groupMembers.filter(gm=> gm.profile_id===m.id).map(gm=> gm.group_id);
-    const allGids = [...new Set([...gids,...extraGids])];
-    const matchesGroup = selectedGroupFilter === 'all' || allGids.includes(selectedGroupFilter);
-    return matchesSearch && matchesGroup;
-  });
-
   const getGroupName = (member) => {
     const gids = member.group_ids? member.group_ids.split(',').filter(Boolean) : [];
-    const extra = groupMembers.filter(gm=> gm.profile_id===member.id).map(gm=> gm.group_id);
+    const extra = groupMembers.filter(gm=> (gm.profile_id||gm.id)===member.id).map(gm=> gm.group_id);
     const all = [...new Set([...gids,...extra])];
-    if (all.length===0) return '—';
+    if (all.length===0) return member._groupNames || '—';
     return all.map(id=> groups.find(g=> g.id===id)?.name || id).join(', ');
   };
+
+  // FIXED: Build from groupMembers directly, not only allProfiles
+  const filteredMembers = (() => {
+    const q = searchQ.trim().toLowerCase();
+    let gms = selectedGroupFilter === 'all'? groupMembers : groupMembers.filter(gm => gm.group_id === selectedGroupFilter);
+
+    // dedupe by profile_id and map to profile
+    const map = new Map();
+    gms.forEach(gm => {
+      const pid = gm.profile_id || gm.profileId || gm.id;
+      if (!pid || map.has(pid)) return;
+      const found = allProfiles.find(p => p.id === pid);
+      const profile = found || gm.profile || gm;
+      // normalize
+      const normalized = {
+        id: pid,
+        display_name: profile.display_name || profile.name || gm.display_name || pid,
+        photo_url: profile.photo_url || gm.photo_url || '',
+        bio: profile.bio || gm.bio || '',
+        category: profile.category || gm.category || 'Fnd',
+        group_ids: '',
+        _groupNames: groups.filter(g => groupMembers.some(x => (x.profile_id||x.id)===pid && x.group_id===g.id)).map(g=>g.name).join(', ')
+      };
+      map.set(pid, normalized);
+    });
+    let base = Array.from(map.values());
+    if (!q) return base;
+    return base.filter(m => {
+      return m.display_name?.toLowerCase().includes(q) ||
+             m.bio?.toLowerCase().includes(q) ||
+             (m._groupNames||'').toLowerCase().includes(q) ||
+             getGroupName(m).toLowerCase().includes(q);
+    });
+  })();
+
+  const totalInGroups = new Set(groupMembers.map(gm => gm.profile_id || gm.id)).size;
 
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
@@ -249,13 +285,11 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
       <header className="h-[78px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-5 justify-between sticky top-0 z-20 w-full">
         <div className="flex items-center gap-2 md:gap-3">
           <img src={logo} alt="Clandeck" className="h-[36px] md:h-[42px] w-auto object-contain" />
-          <button onClick={onGoDeck} className="px-3 h-8 md:h-9 bg-[#efe8d3] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold">Deck</button>
-          <button onClick={onGoProfile} className="hidden md:flex px-3 h-8 md:h-9 bg-[#efe8d3] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold">Profile</button>
         </div>
-        <div className="hidden lg:flex items-center gap-6 text-[13px] font-bold text-[#5a4a32] absolute left-1/2 -translate-x-1/2">
-          <span className="opacity-40">Family Tree</span>
-          <span className="text-black border-b-2 border-black pb-0.5">Members</span>
-          <span className="opacity-40">Groups</span>
+        <div className="flex items-center gap-6 text-[13px] font-bold text-[#5a4a32] absolute left-1/2 -translate-x-1/2">
+          <button onClick={onGoDeck} className="opacity-60 hover:text-black hover:opacity-100 transition">Family Tree</button>
+          <button className="text-black border-b-2 border-black pb-0.5">Members</button>
+          <button onClick={() => { if (onGoGroups) onGoGroups(); else if (onGoDeck) onGoDeck(); }} className="opacity-60 hover:text-black hover:opacity-100 transition">Groups</button>
         </div>
         <div className="flex items-center gap-2 md:gap-3">
           <button onClick={onLogout} className="px-3 md:px-4 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] md:text-[12px] font-bold hover:bg-[#5a4a32]">Logout</button>
@@ -271,7 +305,7 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
             <div className="mt-4">
               <p className="text-[11px] font-bold text-gray-500 mb-2">GROUPS (profile_groups)</p>
               <div className="space-y-1">
-                <button onClick={()=>setSelectedGroupFilter('all')} className={`w-full text-left px-3 py-2 rounded-[6px] text-[12px] font-bold ${selectedGroupFilter==='all'? 'bg-black text-white' : 'bg-[#f8f5f0] hover:bg-[#efe8d3]'}`}>All ({members.length})</button>
+                <button onClick={()=>setSelectedGroupFilter('all')} className={`w-full text-left px-3 py-2 rounded-[6px] text-[12px] font-bold ${selectedGroupFilter==='all'? 'bg-black text-white' : 'bg-[#f8f5f0] hover:bg-[#efe8d3]'}`}>All ({totalInGroups})</button>
                 {groups.map(g=> (
                   <button key={g.id} onClick={()=>setSelectedGroupFilter(g.id)} className={`w-full text-left px-3 py-2 rounded-[6px] text-[12px] font-bold flex justify-between ${selectedGroupFilter===g.id? 'bg-black text-white' : 'bg-[#f8f5f0] hover:bg-[#efe8d3]'}`}>
                     <span>{g.name}</span>
@@ -303,7 +337,7 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
                 {m.photo_url? <img src={m.photo_url} className="w-12 h-12 rounded-[8px] object-cover shrink-0" alt="" /> : <div className="w-12 h-12 rounded-[8px] bg-[#c9ad83] text-white flex items-center justify-center font-extrabold shrink-0">{m.display_name?.[0]?.toUpperCase()}</div>}
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-[13px] truncate">{m.display_name} <span className={`text-[9px] px-1.5 py-0.5 rounded ${m.category==='Fml'?'bg-black text-white':'bg-[#efe8d3]'}`}>{m.category||'Fnd'}</span></p>
-                  <p className="text-[11px] text-gray-500 truncate">{getGroupName(m)} • {m.bio?.slice(0,40) || 'No bio'}</p>
+                  <p className="text-[11px] text-gray-500 truncate">{m._groupNames || getGroupName(m)} • {m.bio?.slice(0,40) || 'No bio'}</p>
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={()=>handleShare(m)} disabled={sharing===m.id} className="px-2.5 h-7 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] text-[10px] font-bold hover:bg-black hover:text-white">{sharing===m.id? '...' : 'Share'}</button>
@@ -335,7 +369,7 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
                 <label className="text-[10px] font-bold text-gray-500">NAME *</label>
                 <input value={newName} onChange={e=>{ setNewName(e.target.value); setSelectedExistingId(null); }} placeholder="Full Name" className="w-full h-10 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[8px] px-3 text-[12px] mt-1" />
                 {searching && <p className="text-[10px] text-gray-400 mt-1">Searching...</p>}
-                {selectedExistingId && <p className="text-[10px] text-green-600 font-bold mt-1">✓ Existing family member — will keep Fml category</p>}
+                {selectedExistingId && <p className="text-[10px] text-green-600 font-bold mt-1">✓ Existing member — will keep category</p>}
                 {searchResults.length>0 &&!editingId &&!selectedExistingId && (
                   <div className="absolute z-10 mt-1 w-full bg-white border border-[#e9e2d6] rounded-[8px] shadow-lg max-h-[160px] overflow-y-auto">
                     {searchResults.map(r=> (
@@ -348,7 +382,6 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
                   </div>
                 )}
               </div>
-
               {!selectedExistingId && (
                 <>
                   <div>
@@ -361,7 +394,6 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
                   </div>
                 </>
               )}
-
               <div>
                 <label className="text-[10px] font-bold text-gray-500">GROUPS * (multi-select)</label>
                 <div className="mt-1 border border-[#e9e2d6] rounded-[8px] p-2 max-h-[120px] overflow-y-auto bg-[#f8f5f0]">
@@ -381,7 +413,6 @@ export default function Members({ onGoProfile, onGoDeck, onLogout }) {
                   <button onClick={handleCreateGroupInline} disabled={creatingGroup} className="px-4 h-10 bg-[#6b5a45] text-white rounded-[4px] text-[11px] font-bold">{creatingGroup? '...' : 'Create'}</button>
                 </div>
               </div>
-
               <button onClick={handleSave} disabled={saving} className="w-full h-11 bg-black text-white rounded-[4px] font-bold text-[12px] mt-2">
                 {saving? 'Saving...' : editingId? 'Save' : 'Add to Group(s)'}
               </button>

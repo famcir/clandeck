@@ -123,20 +123,53 @@ export default function App() {
     setPage("deck");
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('userId');
+    localStorage.removeItem('userName');
+    localStorage.removeItem('token');
+    setPage("login");
+    setUsername("");
+    setPassword("");
+  };
+
   if (page === "deck") {
     return <Deck 
       onGoProfile={() => setPage("profile")} 
       onGoMemberAdd={() => setPage("memberadd")}
-      onLogout={() => setPage("login")} 
+      onGoGroups={() => setPage("groups")}
+      onLogout={handleLogout} 
     />;
   }
 
   if (page === "profile") {
-    return <Profile userName={userName} onLogout={() => setPage("login")} onEdit={() => setPage("editprofile")} onBack={() => setPage("deck")} onDeck={() => setPage("deck")} />;
+    return <Profile 
+      userName={userName} 
+      onLogout={handleLogout} 
+      onEdit={() => setPage("editprofile")} 
+      onBack={() => setPage("deck")} 
+      onDeck={() => setPage("deck")}
+      onGoMemberAdd={() => setPage("memberadd")}
+      onGoGroups={() => setPage("groups")}
+    />;
   }
 
   if (page === "memberadd") {
-    return <Memberadd onGoProfile={() => setPage("profile")} onGoDeck={() => setPage("deck")} onLogout={() => setPage("login")} />;
+    return <Memberadd 
+      onGoProfile={() => setPage("profile")} 
+      onGoDeck={() => setPage("deck")}
+      onGoGroups={() => setPage("groups")}
+      onLogout={handleLogout} 
+    />;
+  }
+
+  if (page === "groups") {
+    return <Memberadd 
+      onGoProfile={() => setPage("profile")} 
+      onGoDeck={() => setPage("deck")}
+      onGoGroups={() => setPage("groups")}
+      onLogout={handleLogout}
+      initialTab="groups"
+    />;
   }
 
   if (page === "editprofile") {
