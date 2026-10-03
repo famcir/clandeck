@@ -50,7 +50,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     ]
   });
 
-  // CHAT SYSTEM STATE - bottom right popup
   const [showChatSystem, setShowChatSystem] = useState(false);
 
   const [chatOpen, setChatOpen] = useState(false);
@@ -345,7 +344,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     mediaScrollRef.current.scrollBy({ left: dir==='left'? -260 : 260, behavior:'smooth' });
   };
 
-  // For ChatSystem - flatten groupMembers for prop
   const flatGroupMembers = Object.entries(groupMembersMap).flatMap(([gid, members]) =>
     members.map(m => ({ group_id: gid, profile_id: m.id, profile: m }))
   );
@@ -591,10 +589,11 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         </div>
       </div>
 
-      {/* BOTTOM RIGHT CHAT ICON - opens ChatSystem */}
+      {/* MOBILE FIXED CHAT ICON - always on top */}
       <button
         onClick={() => setShowChatSystem(true)}
-        className="fixed bottom-4 right-4 w-[56px] h-[56px] bg-black text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.3)] z-[90] hover:scale-105 transition text-[22px]"
+        className="fixed bottom-5 right-5 w-[56px] h-[56px] bg-black text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-[9999] hover:scale-105 transition text-[22px] md:bottom-4 md:right-4"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         💬
       </button>
@@ -610,7 +609,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         />
       )}
 
-      {/* Keep your old 1-1 quick chat if needed, else remove */}
       {chatOpen && chatWith &&!showChatSystem && (
         <div className="fixed bottom-4 right-4 w-[320px] h-[400px] bg-white border border-[#e9e2d6] rounded-[12px] shadow-2xl flex flex-col z-[95] overflow-hidden">
           <div className="bg-[#efe8d3] px-3 py-2.5 flex justify-between items-center border-b border-[#e9e2d6]">

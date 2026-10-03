@@ -59,7 +59,7 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
   const loadMessages = async () => {
     if (!activeChat) return;
     const url = activeChat.type === 'group'
-    ? `/api/chat/group/${activeChat.id}`
+   ? `/api/chat/group/${activeChat.id}`
       : `/api/chat/direct?user1=${currentUserId}&user2=${activeChat.id}`;
     const data = await fetch(url).then(r => r.json()).catch(() => []);
     setMessages(Array.isArray(data)? data : []);
@@ -104,8 +104,8 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
   }, [inCall]);
 
   return (
-    <div className="fixed bottom-[86px] right-4 z-[100] flex gap-3 items-end" style={{fontFamily:'Plus Jakarta Sans'}}>
-      <div className="w-[360px] h-[520px] bg-[#fffefb] border border-[#e9e2d6] rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 md:inset-auto md:bottom-[86px] md:right-4 z-[9999] flex items-end justify-center md:justify-end bg-black/30 md:bg-transparent p-0 md:p-0" style={{fontFamily:'Plus Jakarta Sans'}}>
+      <div className="w-full md:w-[360px] h-[78vh] md:h-[520px] max-h-[85vh] bg-[#fffefb] border border-[#e9e2d6] rounded-t-[18px] md:rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden mb-0 md:mb-0">
 
         {/* HEADER */}
         <div className="h-[52px] bg-[#efe8d3] border-b border-[#e9e2d6] flex items-center justify-between px-4 shrink-0">
