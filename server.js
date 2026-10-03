@@ -112,7 +112,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool', bucket: BUCKET_NAME }));
 
-// === FIXED: 45 -> 120 sec for incognito background throttle ===
+// === HEARTBEAT ===
 app.post('/api/chatbox/heartbeat', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -123,10 +123,23 @@ app.post('/api/chatbox/heartbeat', async (req,res)=>{
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
+// === NEW: OFFLINE WHEN LOGOUT / CLOSE WINDOW ===
+app.post('/api/chatbox/offline', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {userId} = req.body;
+    if(!userId) return res.json({ok:true});
+    await pool.query(`UPDATE chatbox SET is_online=0, last_seen=NOW() WHERE user_id=?`, [userId]);
+    res.json({ok:true});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
 app.get('/api/chatbox/online', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
-    const [rows] = await pool.query(`SELECT user_id FROM chatbox WHERE last_seen >= NOW() - INTERVAL 120 SECOND`);
+    // auto offline if no heartbeat for 120 sec (incognito / crash)
+    await pool.query(`UPDATE chatbox SET is_online=0 WHERE last_seen < NOW() - INTERVAL 120 SECOND`);
+    const [rows] = await pool.query(`SELECT user_id FROM chatbox WHERE last_seen >= NOW() - INTERVAL 120 SECOND AND is_online=1`);
     res.json(rows.map(r=>r.user_id));
   }catch(e){ res.status(500).json({error:e.message}); }
 });
