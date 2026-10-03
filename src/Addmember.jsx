@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import logo from './assets/clandeck_h.png';
+import CommonHeader from './CommonHeader.jsx';
 
 export default function Members({ onGoProfile, onGoDeck, onGoGroups, onLogout }) {
   const currentUserId = localStorage.getItem('userId') || 'ur001';
@@ -49,7 +49,6 @@ export default function Members({ onGoProfile, onGoDeck, onGoGroups, onLogout })
       for (const grp of (Array.isArray(g)? g : [])) {
         const gm = await fetch(`/api/group-members?group_id=${grp.id}`).then(r=>r.json()).catch(()=>[]);
         const list = Array.isArray(gm)? gm : [];
-        // attach group_id if missing
         list.forEach(item => {
           if (!item.group_id) item.group_id = grp.id;
         });
@@ -242,19 +241,15 @@ export default function Members({ onGoProfile, onGoDeck, onGoGroups, onLogout })
     return all.map(id=> groups.find(g=> g.id===id)?.name || id).join(', ');
   };
 
-  // FIXED: Build from groupMembers directly, not only allProfiles
   const filteredMembers = (() => {
     const q = searchQ.trim().toLowerCase();
     let gms = selectedGroupFilter === 'all'? groupMembers : groupMembers.filter(gm => gm.group_id === selectedGroupFilter);
-
-    // dedupe by profile_id and map to profile
     const map = new Map();
     gms.forEach(gm => {
       const pid = gm.profile_id || gm.profileId || gm.id;
       if (!pid || map.has(pid)) return;
       const found = allProfiles.find(p => p.id === pid);
       const profile = found || gm.profile || gm;
-      // normalize
       const normalized = {
         id: pid,
         display_name: profile.display_name || profile.name || gm.display_name || pid,
@@ -282,20 +277,15 @@ export default function Members({ onGoProfile, onGoDeck, onGoGroups, onLogout })
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}`}</style>
 
-      <header className="h-[78px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-5 justify-between sticky top-0 z-20 w-full">
-        <div className="flex items-center gap-2 md:gap-3">
-          <img src={logo} alt="Clandeck" className="h-[36px] md:h-[42px] w-auto object-contain" />
-        </div>
-        <div className="flex items-center gap-6 text-[13px] font-bold text-[#5a4a32] absolute left-1/2 -translate-x-1/2">
-          <button onClick={onGoDeck} className="opacity-60 hover:text-black hover:opacity-100 transition">Family Tree</button>
-          <button className="text-black border-b-2 border-black pb-0.5">Members</button>
-          <button onClick={() => { if (onGoGroups) onGoGroups(); else if (onGoDeck) onGoDeck(); }} className="opacity-60 hover:text-black hover:opacity-100 transition">Groups</button>
-        </div>
-        <div className="flex items-center gap-2 md:gap-3">
-          <button onClick={onLogout} className="px-3 md:px-4 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] md:text-[12px] font-bold hover:bg-[#5a4a32]">Logout</button>
-          {loggedProfile?.photo_url? <img src={loggedProfile.photo_url} onClick={onGoProfile} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] object-cover border border-[#e9e2d6] cursor-pointer" alt="" /> : <div onClick={onGoProfile} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[11px] font-bold cursor-pointer">{(loggedProfile?.display_name?.[0]||'?').toUpperCase()}</div>}
-        </div>
-      </header>
+      <CommonHeader
+        page="members"
+        self={loggedProfile}
+        onDeck={onGoDeck}
+        onProfile={onGoProfile}
+        onMembers={()=>{}}
+        onGroups={onGoGroups}
+        onLogout={onLogout}
+      />
 
       <div className="p-4 grid grid-cols-12 gap-4">
         <div className="col-span-12 lg:col-span-3 space-y-4">

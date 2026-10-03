@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import logo from './assets/clandeck_h.png';
+import CommonHeader from './CommonHeader.jsx';
+import ChatSystem from './ChatSystem.jsx';
 import mangoBasket from './assets/mango-basket.png';
 
 const HomeIcon = () => (
@@ -48,6 +49,9 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
       { thumb:'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=400', views:'1.2k' },
     ]
   });
+
+  // CHAT SYSTEM STATE - bottom right popup
+  const [showChatSystem, setShowChatSystem] = useState(false);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [chatWith, setChatWith] = useState(null);
@@ -105,7 +109,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     if (profileId === currentUserId || profileId === loggedProfile?.id) {
       const all = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).catch(()=>[]);
       const fmlAll = onlyFml(all);
-      const self = fmlAll?.find(p=>p.id===profileId) || fmlAll?.[0] || null;
+      const self = fmlAll?.find(p=>p.id===profileId) || fmlAll?.find(p=>p.father_id===null && p.mother_id===null) || fmlAll?.[0] || null;
       const withRelations = computeFallbackRelations(fmlAll || [], self);
       setTreeProfiles(withRelations);
       setTreeSelf(self);
@@ -135,7 +139,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     setGroupMembersMap({});
   }, [displayProfile]);
 
-  // --- UNLIMITED LEVEL FIX ---
   useEffect(()=>{
     if(treeDepth === 0){ setExtendedTree([]); return; }
     const base = treeProfiles;
@@ -342,37 +345,27 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     mediaScrollRef.current.scrollBy({ left: dir==='left'? -260 : 260, behavior:'smooth' });
   };
 
+  // For ChatSystem - flatten groupMembers for prop
+  const flatGroupMembers = Object.entries(groupMembersMap).flatMap(([gid, members]) =>
+    members.map(m => ({ group_id: gid, profile_id: m.id, profile: m }))
+  );
+
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0;-webkit-overflow-scrolling:touch}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}@media(max-width:768px){.family-scroll{height:520px;overflow:auto!important}.family-scroll svg{overflow:visible!important}}.scrollbar-hide::-webkit-scrollbar{display:none}.scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}`}</style>
 
-      <header className="h-[78px] bg-[#fffefb] border-b border-[#e9e2d6] flex items-center px-3 md:px-5 justify-between sticky top-0 z-20 w-full">
-        <div className="flex items-center gap-2 md:gap-3">
-          <img src={logo} alt="Clandeck" className="h-[36px] md:h-[42px] w-auto object-contain" />
-          {isViewingOther && (
-            <button onClick={handleBackToMyTree} className="px-3 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Home</button>
-          )}
-        </div>
-        {!isViewingOther && (
-          <div className="hidden lg:flex items-center gap-6 text-[13px] font-bold text-[#5a4a32] absolute left-1/2 -translate-x-1/2">
-            <span className="text-black border-b-2 border-black pb-0.5">Family Tree</span>
-            <button onClick={onGoMemberAdd} className="opacity-60 hover:opacity-100 hover:text-black transition-opacity">Members</button>
-            <button onClick={onGoGroups? onGoGroups : onGoMemberAdd} className="opacity-60 hover:opacity-100 hover:text-black transition-opacity">Groups</button>
-          </div>
-        )}
-        <div className="flex items-center gap-2 md:gap-3">
-          {!isViewingOther && <button onClick={onGoMemberAdd} className="lg:hidden px-3 h-8 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] text-[11px] font-bold">Members</button>}
-          <button className="w-8 h-8 md:w-9 md:h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] flex items-center justify-center hover:bg-[#efe8d3] transition-colors">
-            <svg className="w-4 h-4 text-[#5a4a32]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M21 21l-4.3-4.3"/></svg>
-          </button>
-          <button className="w-8 h-8 md:w-9 md:h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-[4px] flex items-center justify-center hover:bg-[#efe8d3] transition-colors relative">
-            <svg className="w-4 h-4 text-[#5a4a32]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 7 6 5 6 9H0s6-2 6-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-          </button>
-          <button onClick={onLogout} className="px-3 md:px-4 h-8 md:h-9 bg-[#6b5a45] text-white rounded-[4px] text-[11px] md:text-[12px] font-bold tracking-wide hover:bg-[#5a4a32] transition-colors">Logout</button>
-          {loggedProfile?.photo_url? <img src={loggedProfile?.photo_url} onClick={onGoProfile} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] object-cover cursor-pointer border border-[#e9e2d6]" title="Click to edit profile" alt="profile" /> : <div onClick={onGoProfile} className="w-8 h-8 md:w-9 md:h-9 rounded-[4px] bg-[#6b5a45] text-white flex items-center justify-center text-[11px] font-bold cursor-pointer" title="Click to edit profile">{(getDisplayName(loggedProfile)?.[0]||'?').toUpperCase()}</div>}
-        </div>
-      </header>
+      <CommonHeader
+        page="deck"
+        self={loggedProfile}
+        displayProfile={displayProfile}
+        isViewingOther={isViewingOther}
+        onDeck={handleBackToMyTree}
+        onProfile={onGoProfile}
+        onMembers={onGoMemberAdd}
+        onGroups={onGoGroups}
+        onLogout={onLogout}
+        onBackToMyTree={handleBackToMyTree}
+      />
 
       <div className="p-4 grid grid-cols-12 gap-4 w-full">
         <div className="col-span-12 lg:col-span-3 space-y-4">
@@ -598,24 +591,36 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         </div>
       </div>
 
-      {!chatOpen && (
-        <button onClick={()=>displayProfile && openChat(displayProfile)}
-          className="fixed bottom-4 right-4 w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shadow-xl z-50 hover:scale-105 transition-transform">
-          💬
-        </button>
+      {/* BOTTOM RIGHT CHAT ICON - opens ChatSystem */}
+      <button
+        onClick={() => setShowChatSystem(true)}
+        className="fixed bottom-4 right-4 w-[56px] h-[56px] bg-black text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.3)] z-[90] hover:scale-105 transition text-[22px]"
+      >
+        💬
+      </button>
+
+      {/* CHAT SYSTEM POPUP - immediate family + groups */}
+      {showChatSystem && (
+        <ChatSystem
+          self={loggedProfile}
+          allProfiles={allProfiles}
+          groups={myGroups}
+          groupMembers={flatGroupMembers.length? flatGroupMembers : Object.entries(groupMembersMap).flatMap(([gid, ms]) => ms.map(m=>({group_id: gid, profile_id: m.id})))}
+          onClose={() => setShowChatSystem(false)}
+        />
       )}
-      {chatOpen && chatWith && (
-        <div className="fixed bottom-4 right-4 w-[320px] h-[400px] bg-white border border-[#e9e2d6] rounded-[12px] shadow-2xl flex flex-col z-50 overflow-hidden">
+
+      {/* Keep your old 1-1 quick chat if needed, else remove */}
+      {chatOpen && chatWith &&!showChatSystem && (
+        <div className="fixed bottom-4 right-4 w-[320px] h-[400px] bg-white border border-[#e9e2d6] rounded-[12px] shadow-2xl flex flex-col z-[95] overflow-hidden">
           <div className="bg-[#efe8d3] px-3 py-2.5 flex justify-between items-center border-b border-[#e9e2d6]">
             <div className="flex items-center gap-2">
               {chatWith.photo_url? <img src={chatWith.photo_url} className="w-7 h-7 rounded-full object-cover" alt="" /> : <div className="w-7 h-7 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[10px] font-bold">{(getDisplayName(chatWith)[0]||'?').toUpperCase()}</div>}
               <span className="text-[12px] font-extrabold">{getDisplayName(chatWith)}</span>
-              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
             </div>
             <button onClick={()=>setChatOpen(false)} className="w-6 h-6 rounded-full bg-black text-white flex items-center justify-center text-[12px]">✕</button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 bg-[#fffefb]">
-            {chatMessages.length===0 && <p className="text-[11px] text-gray-400 text-center mt-8">Say hi to {getDisplayName(chatWith)} 👋</p>}
             {chatMessages.map(m=>(
               <div key={m.id||m._id} className={`max-w-[75%] px-3 py-1.5 rounded-[12px] text-[12px] leading-snug ${m.from_user_id===currentUserId || m.me? 'self-end bg-black text-white rounded-br-[4px]' : 'self-start bg-[#efe8d3] text-black rounded-bl-[4px]'}`}>
                 {m.text || m.message}
@@ -624,10 +629,8 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
             <div ref={chatEndRef} />
           </div>
           <div className="p-2 border-t border-[#e9e2d6] flex gap-2 bg-white">
-            <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendChat()}
-              placeholder={`Message ${getDisplayName(chatWith).split(' ')[0]}...`}
-              className="flex-1 bg-[#f5f0e8] rounded-full px-3 py-2 text-[12px] outline-none border border-[#e9e2d6] focus:border-black" />
-            <button onClick={sendChat} className="w-8 h-8 bg-black text-white rounded-full flex items-center justify-center text-[12px] hover:bg-[#222]">➤</button>
+            <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendChat()} placeholder="Message..." className="flex-1 bg-[#f5f0e8] rounded-full px-3 py-2 text-[12px] outline-none border border-[#e9e2d6]" />
+            <button onClick={sendChat} className="w-8 h-8 bg-black text-white rounded-full flex items-center justify-center">➤</button>
           </div>
         </div>
       )}
