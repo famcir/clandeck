@@ -59,7 +59,6 @@ if (!dbUrl) {
         await pool.query(`CREATE TABLE IF NOT EXISTS notifications (
           id VARCHAR(255) PRIMARY KEY,
           to_user_id VARCHAR(255),
-          from_user_id VARCHAR(255),
           from_name VARCHAR(255),
           title VARCHAR(255),
           body TEXT,
@@ -90,8 +89,19 @@ if (!dbUrl) {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           INDEX idx_group (group_id, created_at)
         )`);
+        await pool.query(`CREATE TABLE IF NOT EXISTS video_calls (
+          id VARCHAR(255) PRIMARY KEY,
+          caller_id VARCHAR(255),
+          caller_name VARCHAR(255),
+          receiver_id VARCHAR(255),
+          status ENUM('ringing','accepted','rejected','ended') DEFAULT 'ringing',
+          sdp_offer TEXT,
+          sdp_answer TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_receiver (receiver_id, status)
+        )`);
         await pool.query(`ALTER TABLE profiles ADD COLUMN category VARCHAR(10) DEFAULT 'Fml'`).catch(()=>{});
-        console.log("✅ Groups + Chatbox tables ready");
+        console.log("✅ Groups + Chatbox + Video Calls tables ready");
       } catch(e){ console.log("table init:", e.message); }
     }).catch(err => console.error("❌ DB Failed:", err.message));
   } catch (err) { console.error("Pool error:", err.message); }
@@ -123,7 +133,7 @@ app.post('/api/chatbox/heartbeat', async (req,res)=>{
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
-// === NEW: OFFLINE WHEN LOGOUT / CLOSE WINDOW ===
+// === OFFLINE ===
 app.post('/api/chatbox/offline', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -137,10 +147,65 @@ app.post('/api/chatbox/offline', async (req,res)=>{
 app.get('/api/chatbox/online', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
-    // auto offline if no heartbeat for 120 sec (incognito / crash)
     await pool.query(`UPDATE chatbox SET is_online=0 WHERE last_seen < NOW() - INTERVAL 120 SECOND`);
     const [rows] = await pool.query(`SELECT user_id FROM chatbox WHERE last_seen >= NOW() - INTERVAL 120 SECOND AND is_online=1`);
     res.json(rows.map(r=>r.user_id));
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+// === VIDEO CALL SIGNALING ===
+app.post('/api/call/request', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {caller_id, caller_name, receiver_id, sdp_offer} = req.body;
+    const id = `call_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
+    await pool.query(`INSERT INTO video_calls (id, caller_id, caller_name, receiver_id, status, sdp_offer) VALUES (?,?,?,?, 'ringing',?)`, [id, caller_id, caller_name, receiver_id, sdp_offer||null]);
+    const nId = `ntf_${Date.now()}_call`;
+    await pool.query(`INSERT INTO notifications (id, to_user_id, from_user_id, from_name, title, body, type) VALUES (?,?,?,?,?,?, 'video_call')`, [nId, receiver_id, caller_id, caller_name, 'Incoming video call', `${caller_name} is calling you`]);
+    res.json({ok:true, callId:id});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/call/incoming/:userId', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const [rows] = await pool.query(`SELECT * FROM video_calls WHERE receiver_id=? AND status='ringing' AND created_at >= NOW() - INTERVAL 60 SECOND ORDER BY created_at DESC LIMIT 1`, [req.params.userId]);
+    res.json(rows[0]||null);
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/call/:callId', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const [rows] = await pool.query(`SELECT * FROM video_calls WHERE id=?`, [req.params.callId]);
+    res.json(rows[0]||null);
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/call/accept', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {callId, sdp_answer} = req.body;
+    await pool.query(`UPDATE video_calls SET status='accepted', sdp_answer=? WHERE id=?`, [sdp_answer||null, callId]);
+    res.json({ok:true});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/call/reject', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {callId} = req.body;
+    await pool.query(`UPDATE video_calls SET status='rejected' WHERE id=?`, [callId]);
+    res.json({ok:true});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/call/end', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {callId} = req.body;
+    await pool.query(`UPDATE video_calls SET status='ended' WHERE id=?`, [callId]);
+    res.json({ok:true});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
@@ -864,10 +929,10 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
     if (!profileId) return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
     const safeName = req.file.originalname.replace(/\s+/g, '-');
-    const key = `avatars/${profileId}/${safeName}`;
+    const key = `avatars/${profileId}/${Date.now()}_${safeName}`;
     await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'image/jpeg' }));
-    const host = `${req.protocol}://${req.get('host')}`;
-    const publicUrl = `${host}/api/files/${key}`;
+    // FIX: save relative path only, works on localhost AND production
+    const publicUrl = `/api/files/${key}`;
     if (pool) await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]);
     res.json({ success: true, url: publicUrl, key: key, folder: profileId });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -879,6 +944,7 @@ app.get('/api/files/*', async (req, res) => {
     const data = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
     res.setHeader('Content-Type', data.ContentType || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     data.Body.pipe(res);
   } catch (err) { res.status(404).json({ error: "File not found", details: err.message }); }
 });
