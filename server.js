@@ -29,7 +29,6 @@ if (!dbUrl) {
     pool.getConnection().then(async c => {
       console.log("✅ DB Connected!");
       c.release();
-      // === AUTO CREATE NEW TABLES ===
       try {
         await pool.query(`CREATE TABLE IF NOT EXISTS profile_groups (
           id VARCHAR(255) PRIMARY KEY,
@@ -50,14 +49,54 @@ if (!dbUrl) {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE KEY unique_group_profile (group_id, profile_id)
         )`);
+        await pool.query(`CREATE TABLE IF NOT EXISTS chatbox (
+          user_id VARCHAR(255) PRIMARY KEY,
+          display_name VARCHAR(255),
+          last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          is_online TINYINT(1) DEFAULT 1,
+          current_page VARCHAR(255) DEFAULT 'deck'
+        )`);
+        await pool.query(`CREATE TABLE IF NOT EXISTS notifications (
+          id VARCHAR(255) PRIMARY KEY,
+          to_user_id VARCHAR(255),
+          from_user_id VARCHAR(255),
+          from_name VARCHAR(255),
+          title VARCHAR(255),
+          body TEXT,
+          type VARCHAR(50) DEFAULT 'chat',
+          is_read TINYINT(1) DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_to_user (to_user_id, is_read)
+        )`);
+        await pool.query(`CREATE TABLE IF NOT EXISTS direct_messages (
+          id VARCHAR(255) PRIMARY KEY,
+          sender_id VARCHAR(255),
+          sender_name VARCHAR(255),
+          direct_to VARCHAR(255),
+          text TEXT,
+          type VARCHAR(50) DEFAULT 'text',
+          file_name VARCHAR(255),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_chat (sender_id, direct_to, created_at)
+        )`);
+        await pool.query(`CREATE TABLE IF NOT EXISTS group_messages (
+          id VARCHAR(255) PRIMARY KEY,
+          sender_id VARCHAR(255),
+          sender_name VARCHAR(255),
+          group_id VARCHAR(255),
+          text TEXT,
+          type VARCHAR(50) DEFAULT 'text',
+          file_name VARCHAR(255),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_group (group_id, created_at)
+        )`);
         await pool.query(`ALTER TABLE profiles ADD COLUMN category VARCHAR(10) DEFAULT 'Fml'`).catch(()=>{});
-        console.log("✅ Groups tables ready");
+        console.log("✅ Groups + Chatbox tables ready");
       } catch(e){ console.log("table init:", e.message); }
     }).catch(err => console.error("❌ DB Failed:", err.message));
   } catch (err) { console.error("Pool error:", err.message); }
 }
 
-// --- S3 CLIENT ---
 const BUCKET_NAME = process.env.RAILWAY_BUCKET_NAME || process.env.BUCKET_NAME || "clandeckbucket-kbeh97nv8b";
 const s3 = new S3Client({
   region: 'auto',
@@ -70,9 +109,80 @@ const s3 = new S3Client({
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- API ROUTES ---
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool', bucket: BUCKET_NAME }));
+
+// === FIXED: 45 -> 120 sec for incognito background throttle ===
+app.post('/api/chatbox/heartbeat', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {userId, displayName} = req.body;
+    if(!userId) return res.status(400).json({error:"userId required"});
+    await pool.query(`INSERT INTO chatbox (user_id, display_name, last_seen, is_online) VALUES (?,?,NOW(),1) ON DUPLICATE KEY UPDATE last_seen=NOW(), is_online=1, display_name=COALESCE(?, display_name)`, [userId, displayName||userId, displayName||userId]);
+    res.json({ok:true});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/chatbox/online', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const [rows] = await pool.query(`SELECT user_id FROM chatbox WHERE last_seen >= NOW() - INTERVAL 120 SECOND`);
+    res.json(rows.map(r=>r.user_id));
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/chatbox/notify', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {to_user_id, from_user_id, from_name, title, body} = req.body;
+    const [online] = await pool.query(`SELECT user_id FROM chatbox WHERE user_id=? AND last_seen >= NOW() - INTERVAL 120 SECOND`, [to_user_id]);
+    if(online.length===0){
+      const id = `ntf_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+      await pool.query(`INSERT INTO notifications (id, to_user_id, from_user_id, from_name, title, body, type) VALUES (?,?,?,?,?,?, 'chat')`, [id, to_user_id, from_user_id, from_name, title||`You have chat from ${from_name}`, body]);
+    }
+    res.json({notified: online.length===0});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/notifications/:userId', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const [rows] = await pool.query(`SELECT * FROM notifications WHERE to_user_id=? ORDER BY created_at DESC LIMIT 50`, [req.params.userId]);
+    res.json(rows);
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/chat/send', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {sender_id, sender_name, text, type, direct_to, group_id, fileName} = req.body;
+    const id = `msg_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+    if(group_id){
+      await pool.query(`INSERT INTO group_messages (id, sender_id, sender_name, group_id, text, type, file_name) VALUES (?,?,?,?,?,?,?)`, [id, sender_id, sender_name, group_id, text, type||'text', fileName||null]);
+    }else{
+      await pool.query(`INSERT INTO direct_messages (id, sender_id, sender_name, direct_to, text, type, file_name) VALUES (?,?,?,?,?,?,?)`, [id, sender_id, sender_name, direct_to, text, type||'text', fileName||null]);
+    }
+    res.json({ok:true, id});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/chat/direct', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const {user1, user2} = req.query;
+    if(!user1 ||!user2) return res.json([]);
+    const [rows] = await pool.query(`SELECT * FROM direct_messages WHERE (sender_id=? AND direct_to=?) OR (sender_id=? AND direct_to=?) ORDER BY created_at ASC LIMIT 200`, [user1, user2, user2, user1]);
+    res.json(rows);
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/chat/group/:groupId', async (req,res)=>{
+  if(!pool) return res.status(500).json({error:"DB not connected"});
+  try{
+    const [rows] = await pool.query(`SELECT * FROM group_messages WHERE group_id=? ORDER BY created_at ASC LIMIT 200`, [req.params.groupId]);
+    res.json(rows);
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
 
 app.post('/api/register', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not configured" });
@@ -94,8 +204,6 @@ app.post('/api/share-temp-user', async (req, res) => {
     try { await pool.query("ALTER TABLE users ADD COLUMN invited_by_user_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN shared_profile_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN is_temp TINYINT DEFAULT 0"); } catch(e) {}
-
-    // === OWNERSHIP CHECK - Sarala case ===
     if (profile_id) {
       try {
         const [pRows] = await pool.query("SELECT id, display_name, owner_user_id, is_claimed FROM profiles WHERE id=?", [profile_id]);
@@ -117,7 +225,6 @@ app.post('/api/share-temp-user', async (req, res) => {
         console.log("ownership check skip:", chkErr.message);
       }
     }
-
     await pool.execute(
       "INSERT INTO users (id, name, email, uname, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?,?)",
       [id, name, email || finalUname, finalUname, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]
@@ -219,7 +326,6 @@ app.get('/api/basket/:userId', async (req, res) => {
     try { await pool.query("ALTER TABLE profiles ADD COLUMN created_by_user_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE profiles ADD COLUMN is_claimed TINYINT DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE profiles ADD COLUMN owner_user_id VARCHAR(255)"); } catch(e) {}
-
     const [totalRows] = await pool.query(
       `SELECT COUNT(*) as total FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND id!=?`,
       [userId, userId, userId]
@@ -232,7 +338,6 @@ app.get('/api/basket/:userId', async (req, res) => {
       `SELECT COUNT(*) as unclaimed FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND (is_claimed=0 OR is_claimed IS NULL) AND id!=?`,
       [userId, userId, userId]
     );
-
     res.json({
       userId,
       totalCreated: totalRows[0]?.total || 0,
@@ -263,7 +368,6 @@ app.get('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
     const { owner_user_id, search } = req.query;
-
     if (search && search.trim().length > 0) {
       const s = search.trim().toLowerCase();
       const likeAny = `%${s}%`;
@@ -282,9 +386,7 @@ app.get('/api/profiles', async (req, res) => {
       }
       return res.json(rows);
     }
-
     if (!owner_user_id) return res.json([]);
-
     const [owned] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
     let self = owned.find(p => p.id === owner_user_id);
     if (!self) {
@@ -537,10 +639,8 @@ app.post('/api/profiles', async (req, res) => {
     const finalId = id || `pr_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
     const finalRelation = relation || relation_label || 'Family';
     const myId = my_profile_id || null;
-    // === FIX: keep original category, don't force to Fnd ===
     let finalCategory = category || 'Fml';
     if (!['Fml','Fnd'].includes(finalCategory)) finalCategory = 'Fml';
-
     if (!finalName) { await conn.rollback(); return res.status(400).json({ error: "display_name required" }); }
     if (!owner_user_id) { await conn.rollback(); return res.status(400).json({ error: "owner_user_id required" }); }
     let newFatherId = father_id || null;
@@ -569,8 +669,6 @@ app.post('/api/profiles', async (req, res) => {
     } catch (catErr) {
       await conn.execute(`INSERT INTO profiles (id, owner_user_id, display_name, dob, photo_url, is_claimed, created_by_user_id, bio, location, gender, father_id, mother_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, [finalId, owner_user_id, finalName, dob || null, photo_url || null, 0, owner_user_id, bio || null, location || null, newGender, newFatherId, newMotherId]);
     }
-
-    // === FIX: allow group linking for ANY category, not only Fnd ===
     if (group_ids && Array.isArray(group_ids) && group_ids.length > 0) {
       for (const gid of group_ids) {
         const gmId = `gm_${Date.now()}_${Math.random().toString(36).substr(2,5)}_${gid.substr(0,4)}`;
@@ -580,7 +678,6 @@ app.post('/api/profiles', async (req, res) => {
         } catch(e) { console.log("group insert skip:", e.message); }
       }
     }
-
     if (me && finalCategory === 'Fml') {
       if (finalRelation === 'Father') {
         await conn.query(`UPDATE profiles SET father_id=? WHERE id=?`, [finalId, myId]);
@@ -710,7 +807,6 @@ app.get('/api/group-members', async (req, res) => {
       return res.json(rows);
     }
     if (owner_user_id) {
-      // === FIX: return ALL profiles owned, not only Fnd ===
       const [rows] = await pool.query(`
         SELECT p.*, GROUP_CONCAT(gm.group_id) as group_ids
         FROM profiles p
@@ -731,7 +827,6 @@ app.post('/api/group-members', async (req, res) => {
     const gmId = `gm_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
     await pool.execute(`INSERT INTO group_members (id, group_id, profile_id, owner_user_id) VALUES (?,?,?,?)`, [gmId, group_id, profile_id, owner_user_id]);
     await pool.execute(`UPDATE profile_groups SET member_count = (SELECT COUNT(*) FROM group_members WHERE group_id=?) WHERE id=?`, [group_id, group_id]);
-    // === FIX: don't change category when adding to group ===
     res.json({ success: true, id: gmId });
   } catch (err) {
     if (err.message.includes('Duplicate')) return res.status(400).json({ error: "Already in group" });
