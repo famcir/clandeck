@@ -11,14 +11,20 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
   const [onlineIds, setOnlineIds] = useState(new Set());
   const [groupCounts, setGroupCounts] = useState({});
   const [myFamily, setMyFamily] = useState([]);
-  const [myGroups, setMyGroups] = useState([]); // FIX: login user's groups
+  const [myGroups, setMyGroups] = useState([]);
+  // VIDEO CALL NEW STATES
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [currentCallId, setCurrentCallId] = useState(null);
+  const [callStatus, setCallStatus] = useState('');
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerRef = useRef(null);
+  const ringingAudioRef = useRef(null);
 
-  // FIX 1: always login user's family
   useEffect(() => {
     if(!self?.id) return;
     fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(data=>{
@@ -26,7 +32,6 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     }).catch(()=>{});
   }, [self?.id, currentUserId]);
 
-  // FIX 2: always login user's groups - this fixes Best Friends bug
   useEffect(() => {
     fetch(`/api/profile-groups?owner_user_id=${currentUserId}`).then(r=>r.json()).then(data=>{
       if(Array.isArray(data) && data.length>0) setMyGroups(data);
@@ -34,7 +39,6 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     }).catch(()=> setMyGroups(groups));
   }, [currentUserId]);
 
-  // fetch counts for MY groups, not prop groups
   useEffect(() => {
     const list = myGroups.length>0? myGroups : groups;
     if(!list.length) return;
@@ -74,17 +78,117 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
         body: JSON.stringify({userId: self.id, displayName: self?.display_name || currentUserId})
       }).catch(()=>{});
     };
+    const goOffline = () => {
+      const data = JSON.stringify({userId: self.id});
+      try{ navigator.sendBeacon('/api/chatbox/offline', new Blob([data], {type:'application/json'})); }catch{}
+      fetch('/api/chatbox/offline', { method:'POST', headers:{'Content-Type':'application/json'}, body: data, keepalive:true }).catch(()=>{});
+    };
     fetchOnline(); heartbeat();
     const id1 = setInterval(fetchOnline, 3000);
     const id2 = setInterval(heartbeat, 10000);
-    return () => { clearInterval(id1); clearInterval(id2); };
+    window.addEventListener('beforeunload', goOffline);
+    window.addEventListener('pagehide', goOffline);
+    return () => { clearInterval(id1); clearInterval(id2); window.removeEventListener('beforeunload', goOffline); window.removeEventListener('pagehide', goOffline); goOffline(); };
   }, [self?.id]);
 
+  // === NEW: INCOMING CALL POLLING FOR THANMAYEE ===
+  useEffect(() => {
+    if(!chatUserId) return;
+    const checkIncoming = async () => {
+      try{
+        const call = await fetch(`/api/call/incoming/${chatUserId}`).then(r=>r.json()).catch(()=>null);
+        if(call && call.id && call.caller_id!== chatUserId){
+          setIncomingCall(call);
+          setCurrentCallId(call.id);
+          // play ringing
+          if(ringingAudioRef.current){ ringingAudioRef.current.play().catch(()=>{}); }
+        }
+      }catch{}
+    };
+    checkIncoming();
+    const id = setInterval(checkIncoming, 3000);
+    return ()=> clearInterval(id);
+  }, [chatUserId]);
+
+  // === NEW: IF CALLER WAITING FOR ACCEPT ===
+  useEffect(() => {
+    if(!currentCallId || incomingCall) return;
+    const checkAccepted = async () => {
+      try{
+        const c = await fetch(`/api/call/${currentCallId}`).then(r=>r.json());
+        if(c?.status === 'accepted' && c.sdp_answer){
+          await peerRef.current?.setRemoteDescription(new RTCSessionDescription(JSON.parse(c.sdp_answer)));
+          setCallStatus('connected');
+        }
+        if(c?.status === 'rejected'){ endCall(); alert('Call rejected'); }
+        if(c?.status === 'ended'){ endCall(); }
+      }catch{}
+    };
+    const id = setInterval(checkAccepted, 2000);
+    return ()=> clearInterval(id);
+  }, [currentCallId, incomingCall]);
+
   const isOnline = (id) => onlineIds.has(id);
+
+  const createPeer = () => {
+    const pc = new RTCPeerConnection({ iceServers: [{urls:'stun:stun.l.google.com:19302'}] });
+    pc.onicecandidate = () => {};
+    pc.ontrack = (e) => { if(remoteVideoRef.current) remoteVideoRef.current.srcObject = e.streams[0]; };
+    return pc;
+  };
+
+  const startCall = async (target) => {
+    const targetId = target.id || target.profile_id;
+    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    if(localVideoRef.current) localVideoRef.current.srcObject = stream;
+    const pc = createPeer();
+    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+    peerRef.current = pc;
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    // request call with sdp_offer
+    const res = await fetch('/api/call/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ caller_id: chatUserId, caller_name: self?.display_name || 'User', receiver_id: targetId, sdp_offer: JSON.stringify(offer) }) }).then(r=>r.json());
+    setCurrentCallId(res.callId);
+    setInCall({type:'video', name: target.display_name || target.name});
+    setCallStatus('ringing... waiting for Thanmayee to accept');
+  };
+
+  const acceptCall = async () => {
+    if(!incomingCall) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    if(localVideoRef.current) localVideoRef.current.srcObject = stream;
+    const pc = createPeer();
+    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+    peerRef.current = pc;
+    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(incomingCall.sdp_offer)));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await fetch('/api/call/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: incomingCall.id, sdp_answer: JSON.stringify(answer) }) });
+    setInCall({type:'video', name: incomingCall.caller_name});
+    setCallStatus('connected');
+    setIncomingCall(null);
+    if(ringingAudioRef.current){ ringingAudioRef.current.pause(); ringingAudioRef.current.currentTime=0; }
+  };
+
+  const rejectCall = async () => {
+    if(!incomingCall &&!currentCallId) return;
+    const id = incomingCall?.id || currentCallId;
+    await fetch('/api/call/reject', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: id }) });
+    setIncomingCall(null); setCurrentCallId(null);
+    if(ringingAudioRef.current){ ringingAudioRef.current.pause(); }
+  };
+
+  const endCall = async () => {
+    if(currentCallId){ await fetch('/api/call/end', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: currentCallId }) }).catch(()=>{}); }
+    stopCamera();
+  };
+
   const stopCamera = () => {
     if (localVideoRef.current?.srcObject) { localVideoRef.current.srcObject.getTracks().forEach(t => t.stop()); localVideoRef.current.srcObject = null; }
+    if (remoteVideoRef.current?.srcObject) { remoteVideoRef.current.srcObject.getTracks().forEach(t => t.stop()); remoteVideoRef.current.srcObject = null; }
     if (mediaRecorderRef.current?.stream) { mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop()); }
-    setInCall(null);
+    peerRef.current?.close(); peerRef.current=null;
+    setInCall(null); setCurrentCallId(null); setCallStatus('');
   };
   const handleCloseAll = () => { stopCamera(); onClose(); };
   const handleBack = () => { stopCamera(); setActiveChat(null); };
@@ -143,7 +247,7 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     mediaRecorderRef.current.start(); setRecording(true);
   };
   const stopVoice = () => { mediaRecorderRef.current?.stop(); setRecording(false); };
-  useEffect(() => { if (inCall && localVideoRef.current) { navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => localVideoRef.current.srcObject = s).catch(()=>{}); } }, [inCall]);
+  useEffect(() => { if (inCall && localVideoRef.current &&!localVideoRef.current.srcObject) { navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => localVideoRef.current.srcObject = s).catch(()=>{}); } }, [inCall]);
 
   return (
     <div className="fixed inset-0 md:inset-auto md:bottom-[86px] md:right-4 z-[9999] flex items-end justify-center md:justify-end bg-black/30 md:bg-transparent p-0 md:p-0" style={{fontFamily:'Plus Jakarta Sans'}}>
@@ -160,7 +264,7 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
                 <div><p className="text-[12px] font-extrabold leading-none">{activeChat.name}</p><p className="text-[9px] text-gray-500">{activeChat.type === 'group'? `${activeChat.members?.length||groupCounts[activeChat.id]?.total||0} members` : isOnline(activeChat.id)? 'Online' : 'Offline'}</p></div>
               </div>
               <div className="flex gap-1.5">
-                <button onClick={() => setInCall({type:activeChat.type})} className="w-8 h-8 bg-white border rounded-[6px]">📹</button>
+                {activeChat.type==='direct' && <button onClick={() => startCall(activeChat)} className="w-8 h-8 bg-white border rounded-[6px]">📹</button>}
                 <button onClick={handleCloseAll} className="w-7 h-7 bg-black text-white rounded-full text-[10px]">✕</button>
               </div>
             </>
@@ -172,12 +276,30 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
           )}
         </div>
 
+        {/* INCOMING CALL POPUP FOR THANMAYEE */}
+        {incomingCall && (
+          <div className="absolute inset-0 bg-black/80 z-[100] flex flex-col items-center justify-center p-6 text-white">
+            <audio ref={ringingAudioRef} loop src="https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg" />
+            <div className="w-20 h-20 rounded-full bg-[#c9ad83] flex items-center justify-center text-2xl font-bold animate-pulse">{incomingCall.caller_name[0]}</div>
+            <p className="mt-4 font-bold text-[16px]">{incomingCall.caller_name} is calling...</p>
+            <p className="text-[12px] text-white/70 mt-1">Video call</p>
+            <div className="flex gap-6 mt-8">
+              <button onClick={rejectCall} className="w-14 h-14 bg-red-600 rounded-full text-white text-xl">✕</button>
+              <button onClick={acceptCall} className="w-14 h-14 bg-green-500 rounded-full text-white text-xl">📹</button>
+            </div>
+          </div>
+        )}
+
         {inCall && (
           <div className="absolute inset-0 bg-black z-50 flex flex-col">
-            <video ref={localVideoRef} autoPlay muted className="flex-1 w-full object-cover" />
+            <div className="flex-1 relative">
+              <video ref={remoteVideoRef} autoPlay className="w-full h-full object-cover bg-black" />
+              <video ref={localVideoRef} autoPlay muted className="absolute bottom-4 right-4 w-24 h-32 object-cover rounded-[10px] border-2 border-white" />
+              <p className="absolute top-4 left-4 bg-black/50 text-white text-[11px] px-2 py-1 rounded">{callStatus || 'Connected'} - {inCall.name}</p>
+            </div>
             <div className="h-[90px] bg-[#111] flex items-center justify-center gap-6">
               <button className="w-12 h-12 bg-[#333] rounded-full text-white">🎙️</button>
-              <button onClick={stopCamera} className="w-14 h-14 bg-red-600 rounded-full text-white font-bold">✕</button>
+              <button onClick={endCall} className="w-14 h-14 bg-red-600 rounded-full text-white font-bold">✕</button>
               <button className="w-12 h-12 bg-[#333] rounded-full text-white">📹</button>
             </div>
           </div>
@@ -186,12 +308,15 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
         {!activeChat? (
           <div className="flex-1 overflow-y-auto">
             {immediateFamily.map(p => (
-              <div key={p.id} onClick={() => setActiveChat({ type: 'direct', id: p.id, name: p.display_name, photo: p.photo_url })} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f5f0] cursor-pointer">
-                <div className="relative">
-                  {p.photo_url? <img src={p.photo_url} className="w-9 h-9 rounded-[8px] object-cover" /> : <div className="w-9 h-9 rounded-[8px] bg-[#c9ad83] text-white flex items-center justify-center font-bold text-[12px]">{p.display_name[0]}</div>}
-                  {isOnline(p.id) && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
+              <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f5f0]">
+                <div onClick={() => setActiveChat({ type: 'direct', id: p.id, name: p.display_name, photo: p.photo_url })} className="flex items-center gap-3 flex-1 cursor-pointer">
+                  <div className="relative">
+                    {p.photo_url? <img src={p.photo_url} className="w-9 h-9 rounded-[8px] object-cover" /> : <div className="w-9 h-9 rounded-[8px] bg-[#c9ad83] text-white flex items-center justify-center font-bold text-[12px]">{p.display_name[0]}</div>}
+                    {isOnline(p.id) && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
+                  </div>
+                  <div className="flex-1 min-w-0"><p className="text-[12px] font-bold truncate">{p.display_name} <span className="text-[9px] text-gray-400">{p.computed_relation}</span></p><p className="text-[10px] text-gray-500">{isOnline(p.id)? 'Online' : p.computed_relation}</p></div>
                 </div>
-                <div className="flex-1 min-w-0"><p className="text-[12px] font-bold truncate">{p.display_name} <span className="text-[9px] text-gray-400">{p.computed_relation}</span></p><p className="text-[10px] text-gray-500">{isOnline(p.id)? 'Online' : p.computed_relation}</p></div>
+                <button onClick={()=> startCall(p)} className="w-7 h-7 bg-white border rounded-full text-[12px]">📹</button>
               </div>
             ))}
             <p className="text-[10px] font-bold text-gray-400 px-4 pt-4 pb-1">YOUR GROUPS</p>

@@ -111,6 +111,7 @@ const BUCKET_NAME = process.env.RAILWAY_BUCKET_NAME || process.env.BUCKET_NAME |
 const s3 = new S3Client({
   region: 'auto',
   endpoint: process.env.ENDPOINT,
+  forcePathStyle: true,
   credentials: {
     accessKeyId: process.env.ACCESS_KEY_ID,
     secretAccessKey: process.env.SECRET_ACCESS_KEY,
@@ -122,6 +123,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool', bucket: BUCKET_NAME }));
 
+//... keep all your routes exactly as you sent below...
+// (heartbeat, offline, online, call, notify, chat, register, login, claim, users, basket, profiles, relations, groups, members - same)
+
 // === HEARTBEAT ===
 app.post('/api/chatbox/heartbeat', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
@@ -132,8 +136,6 @@ app.post('/api/chatbox/heartbeat', async (req,res)=>{
     res.json({ok:true});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
-// === OFFLINE ===
 app.post('/api/chatbox/offline', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -143,7 +145,6 @@ app.post('/api/chatbox/offline', async (req,res)=>{
     res.json({ok:true});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.get('/api/chatbox/online', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -152,8 +153,6 @@ app.get('/api/chatbox/online', async (req,res)=>{
     res.json(rows.map(r=>r.user_id));
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
-// === VIDEO CALL SIGNALING ===
 app.post('/api/call/request', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -165,7 +164,6 @@ app.post('/api/call/request', async (req,res)=>{
     res.json({ok:true, callId:id});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.get('/api/call/incoming/:userId', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -173,7 +171,6 @@ app.get('/api/call/incoming/:userId', async (req,res)=>{
     res.json(rows[0]||null);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.get('/api/call/:callId', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -181,7 +178,6 @@ app.get('/api/call/:callId', async (req,res)=>{
     res.json(rows[0]||null);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.post('/api/call/accept', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -190,7 +186,6 @@ app.post('/api/call/accept', async (req,res)=>{
     res.json({ok:true});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.post('/api/call/reject', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -199,7 +194,6 @@ app.post('/api/call/reject', async (req,res)=>{
     res.json({ok:true});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.post('/api/call/end', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -208,7 +202,6 @@ app.post('/api/call/end', async (req,res)=>{
     res.json({ok:true});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.post('/api/chatbox/notify', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -221,7 +214,6 @@ app.post('/api/chatbox/notify', async (req,res)=>{
     res.json({notified: online.length===0});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.get('/api/notifications/:userId', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -229,7 +221,6 @@ app.get('/api/notifications/:userId', async (req,res)=>{
     res.json(rows);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.post('/api/chat/send', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -243,7 +234,6 @@ app.post('/api/chat/send', async (req,res)=>{
     res.json({ok:true, id});
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.get('/api/chat/direct', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -253,7 +243,6 @@ app.get('/api/chat/direct', async (req,res)=>{
     res.json(rows);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.get('/api/chat/group/:groupId', async (req,res)=>{
   if(!pool) return res.status(500).json({error:"DB not connected"});
   try{
@@ -261,7 +250,6 @@ app.get('/api/chat/group/:groupId', async (req,res)=>{
     res.json(rows);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
-
 app.post('/api/register', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not configured" });
   const { id, name, email, password, uname } = req.body;
@@ -272,7 +260,6 @@ app.post('/api/register', async (req, res) => {
     res.json({ message: "User created!", id });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-
 app.post('/api/share-temp-user', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { id, name, email, password, profile_id, invited_by_user_id, uname } = req.body;
@@ -299,14 +286,9 @@ app.post('/api/share-temp-user', async (req, res) => {
           const dName = pNameRows[0]?.display_name || name || 'User';
           return res.status(403).json({ error: `${dName} take its Ownership, not Possible to create new user credentials` });
         }
-      } catch (chkErr) {
-        console.log("ownership check skip:", chkErr.message);
-      }
+      } catch (chkErr) { console.log("ownership check skip:", chkErr.message); }
     }
-    await pool.execute(
-      "INSERT INTO users (id, name, email, uname, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?,?)",
-      [id, name, email || finalUname, finalUname, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]
-    );
+    await pool.execute("INSERT INTO users (id, name, email, uname, password, status, invited_by_user_id, shared_profile_id, is_temp) VALUES (?,?,?,?,?,?,?,?,?)", [id, name, email || finalUname, finalUname, password || 'pw1234', 'active', invited_by_user_id, profile_id || null, 1]);
     res.json({ success: true, username: finalUname, password: password || 'pw1234' });
   } catch (err) {
     if (err.message.includes('Duplicate')) {
@@ -318,7 +300,6 @@ app.post('/api/share-temp-user', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.post('/api/login', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { email, password, uname } = req.body;
@@ -333,7 +314,6 @@ app.post('/api/login', async (req, res) => {
     res.json({ message: "Login success", id: rows[0].id, name: rows[0].name, email: rows[0].email, uname: rows[0].uname, shared_profile_id: rows[0].shared_profile_id, is_temp: rows[0].is_temp, token: "token-" + rows[0].id });
   } catch (err) { res.status(500).json({ error: "DB Error: " + err.message }); }
 });
-
 app.post('/api/claim-account', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const { userId, newUname, newPassword } = req.body;
@@ -362,11 +342,9 @@ app.post('/api/claim-account', async (req, res) => {
   } catch(e){
     try { await conn.query("SET FOREIGN_KEY_CHECKS=1"); } catch {}
     await conn.rollback();
-    console.error("claim error", e.message);
     res.status(500).json({error: e.message});
   } finally { conn.release(); }
 });
-
 app.get('/api/users', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -387,7 +365,6 @@ app.get('/api/users', async (req, res) => {
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.get('/api/users/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -396,7 +373,6 @@ app.get('/api/users/:id', async (req, res) => {
     res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.get('/api/basket/:userId', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -404,29 +380,12 @@ app.get('/api/basket/:userId', async (req, res) => {
     try { await pool.query("ALTER TABLE profiles ADD COLUMN created_by_user_id VARCHAR(255)"); } catch(e) {}
     try { await pool.query("ALTER TABLE profiles ADD COLUMN is_claimed TINYINT DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE profiles ADD COLUMN owner_user_id VARCHAR(255)"); } catch(e) {}
-    const [totalRows] = await pool.query(
-      `SELECT COUNT(*) as total FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND id!=?`,
-      [userId, userId, userId]
-    );
-    const [claimedRows] = await pool.query(
-      `SELECT COUNT(*) as claimed FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND is_claimed=1 AND id!=?`,
-      [userId, userId, userId]
-    );
-    const [unclaimedRows] = await pool.query(
-      `SELECT COUNT(*) as unclaimed FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND (is_claimed=0 OR is_claimed IS NULL) AND id!=?`,
-      [userId, userId, userId]
-    );
-    res.json({
-      userId,
-      totalCreated: totalRows[0]?.total || 0,
-      claimed: claimedRows[0]?.claimed || 0,
-      unclaimed: unclaimedRows[0]?.unclaimed || 0
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const [totalRows] = await pool.query(`SELECT COUNT(*) as total FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND id!=?`, [userId, userId, userId]);
+    const [claimedRows] = await pool.query(`SELECT COUNT(*) as claimed FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND is_claimed=1 AND id!=?`, [userId, userId, userId]);
+    const [unclaimedRows] = await pool.query(`SELECT COUNT(*) as unclaimed FROM profiles WHERE (created_by_user_id=? OR (created_by_user_id IS NULL AND owner_user_id=?)) AND (is_claimed=0 OR is_claimed IS NULL) AND id!=?`, [userId, userId, userId]);
+    res.json({ userId, totalCreated: totalRows[0]?.total || 0, claimed: claimedRows[0]?.claimed || 0, unclaimed: unclaimedRows[0]?.unclaimed || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.put('/api/users/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -441,7 +400,6 @@ app.put('/api/users/:id', async (req, res) => {
     res.json({ success: true, photo_url });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.get('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -450,13 +408,7 @@ app.get('/api/profiles', async (req, res) => {
       const s = search.trim().toLowerCase();
       const likeAny = `%${s}%`;
       const likeStart = `${s}%`;
-      const [rows] = await pool.query(
-        `SELECT * FROM profiles
-         WHERE LOWER(display_name) LIKE?
-         ORDER BY CASE WHEN LOWER(display_name) LIKE? THEN 0 ELSE 1 END,
-         display_name ASC LIMIT 30`,
-        [likeAny, likeStart]
-      );
+      const [rows] = await pool.query(`SELECT * FROM profiles WHERE LOWER(display_name) LIKE? ORDER BY CASE WHEN LOWER(display_name) LIKE? THEN 0 ELSE 1 END, display_name ASC LIMIT 30`, [likeAny, likeStart]);
       if (owner_user_id) {
         const owned = rows.filter(r => r.owner_user_id === owner_user_id);
         const others = rows.filter(r => r.owner_user_id!== owner_user_id);
@@ -504,7 +456,6 @@ app.get('/api/profiles', async (req, res) => {
     res.json(result);
   } catch(e){ res.status(500).json({error: e.message}) }
 });
-
 app.get('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -512,7 +463,6 @@ app.get('/api/profiles/:id', async (req, res) => {
     res.json(rows[0] || {});
   } catch(e){ res.status(500).json({error: e.message}) }
 });
-
 app.get('/api/family-tree/:profileId', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -555,7 +505,6 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
 app.put('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -570,7 +519,6 @@ app.put('/api/profiles/:id', async (req, res) => {
     } catch(e2){ res.status(500).json({error: e.message}) }
   }
 });
-
 app.post('/api/profiles/link', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
@@ -612,7 +560,6 @@ app.post('/api/profiles/link', async (req, res) => {
     res.status(500).json({error:e.message});
   } finally { conn.release(); }
 });
-
 app.post('/api/profiles/merge', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
@@ -637,7 +584,6 @@ app.post('/api/profiles/merge', async (req, res) => {
     res.status(500).json({error:e.message});
   } finally { conn.release(); }
 });
-
 app.delete('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
@@ -706,7 +652,6 @@ app.delete('/api/profiles/:id', async (req, res) => {
     res.status(500).json({error: e.message})
   } finally { conn.release(); }
 });
-
 app.post('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   const conn = await pool.getConnection();
@@ -811,7 +756,6 @@ app.post('/api/profiles', async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally { conn.release(); }
 });
-
 app.get('/api/relations', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -821,7 +765,6 @@ app.get('/api/relations', async (req, res) => {
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post('/api/relations', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -832,7 +775,6 @@ app.post('/api/relations', async (req, res) => {
     res.json({ success: true, id: finalId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.get('/api/profile-groups', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -842,7 +784,6 @@ app.get('/api/profile-groups', async (req, res) => {
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post('/api/profile-groups', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -857,7 +798,6 @@ app.post('/api/profile-groups', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.delete('/api/profile-groups/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -871,32 +811,21 @@ app.delete('/api/profile-groups/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.get('/api/group-members', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
     const { group_id, owner_user_id } = req.query;
     if (group_id) {
-      const [rows] = await pool.query(`
-        SELECT gm.*, p.display_name, p.photo_url, p.category, p.id as profile_id
-        FROM group_members gm
-        JOIN profiles p ON gm.profile_id = p.id
-        WHERE gm.group_id=?`, [group_id]);
+      const [rows] = await pool.query(`SELECT gm.*, p.display_name, p.photo_url, p.category, p.id as profile_id FROM group_members gm JOIN profiles p ON gm.profile_id = p.id WHERE gm.group_id=?`, [group_id]);
       return res.json(rows);
     }
     if (owner_user_id) {
-      const [rows] = await pool.query(`
-        SELECT p.*, GROUP_CONCAT(gm.group_id) as group_ids
-        FROM profiles p
-        LEFT JOIN group_members gm ON p.id = gm.profile_id
-        WHERE p.owner_user_id=?
-        GROUP BY p.id`, [owner_user_id]);
+      const [rows] = await pool.query(`SELECT p.*, GROUP_CONCAT(gm.group_id) as group_ids FROM profiles p LEFT JOIN group_members gm ON p.id = gm.profile_id WHERE p.owner_user_id=? GROUP BY p.id`, [owner_user_id]);
       return res.json(rows);
     }
     res.json([]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post('/api/group-members', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -911,7 +840,6 @@ app.post('/api/group-members', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.delete('/api/group-members/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -923,26 +851,65 @@ app.delete('/api/group-members/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ===== UPLOAD LOGIC - VOICE & DOCUMENT FOLDERS UNDER profileId =====
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({ error: `Avatar only allows images. Use /api/chat/upload/voice or /api/chat/upload/document for other files` });
+    }
     const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
     if (!profileId) return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
-    const safeName = req.file.originalname.replace(/\s+/g, '-');
+    const safeName = req.file.originalname.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9.\-_]/g, '');
     const key = `avatars/${profileId}/${Date.now()}_${safeName}`;
     await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'image/jpeg' }));
-    // FIX: save relative path only, works on localhost AND production
     const publicUrl = `/api/files/${key}`;
     if (pool) await pool.execute("UPDATE profiles SET photo_url=? WHERE id=?", [publicUrl, profileId]);
-    res.json({ success: true, url: publicUrl, key: key, folder: profileId });
+    res.json({ success: true, url: publicUrl, key: key, folder: profileId, type: 'avatar' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
+app.post('/api/chat/upload/voice', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  try {
+    const profileId = req.query.profileId || req.body?.profileId || req.query.userId || req.body?.userId;
+    if (!profileId) return res.status(400).json({ error: "profileId missing!" });
+    const safeName = req.file.originalname.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9.\-_]/g, '') || `voice_${Date.now()}.webm`;
+    const key = `avatars/${profileId}/voice/${Date.now()}_${safeName}`;
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'audio/webm' }));
+    const publicUrl = `/api/files/${key}`;
+    res.json({ success: true, url: publicUrl, key: key, folder: `${profileId}/voice`, type: 'voice' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/chat/upload/document', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  try {
+    const profileId = req.query.profileId || req.body?.profileId || req.query.userId || req.body?.userId;
+    if (!profileId) return res.status(400).json({ error: "profileId missing!" });
+    const safeName = req.file.originalname.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9.\-_]/g, '');
+    const key = `avatars/${profileId}/documents/${Date.now()}_${safeName}`;
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'application/octet-stream' }));
+    const publicUrl = `/api/files/${key}`;
+    res.json({ success: true, url: publicUrl, key: key, folder: `${profileId}/documents`, type: 'document' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  try {
+    const profileId = req.query.profileId || req.body?.profileId || req.query.userId || req.body?.userId || 'anonymous';
+    const safeName = req.file.originalname.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9.\-_]/g, '') || `file_${Date.now()}`;
+    const isVoice = req.file.mimetype.startsWith('audio/');
+    const subFolder = isVoice? 'voice' : 'documents';
+    const key = `avatars/${profileId}/${subFolder}/${Date.now()}_${safeName}`;
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'application/octet-stream' }));
+    const publicUrl = `/api/files/${key}`;
+    res.json({ success: true, url: publicUrl, key: key, folder: `${profileId}/${subFolder}`, type: subFolder });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.get('/api/files/*', async (req, res) => {
   try {
     const key = req.params[0];
     const data = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
-    res.setHeader('Content-Type', data.ContentType || 'image/jpeg');
+    res.setHeader('Content-Type', data.ContentType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
     res.setHeader('Access-Control-Allow-Origin', '*');
     data.Body.pipe(res);
