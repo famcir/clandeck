@@ -38,7 +38,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
       'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=400',
     ],
     videos: [
-      { thumb:'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=400', dur:'0:32' },
+      { thumb:'https://images.unsplash.com/photo-1609220136736-443140cffec6?w=400', dur:'0:32' },
       { thumb:'https://images.unsplash.com/photo-1609220136736-443140cffec6?w=400', dur:'1:12' },
       { thumb:'https://images.unsplash.com/photo-1542037104857-ffbb0b9155fb?w=400', dur:'0:45' },
     ],
@@ -58,7 +58,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
 
-  const onlyFml = (arr) => (arr||[]).filter(p =>!p.category || p.category === 'Fml');
+  const onlyFml = (arr) => (arr||[]);
   const getDisplayName = (p) => {
     if(!p) return 'Unknown';
     const n = p.display_name || p.name || '';
@@ -67,8 +67,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
   };
   const computeFallbackRelations = (all, self) => {
     if (!self) return onlyFml(all);
-    const fmlAll = onlyFml(all);
-    return fmlAll.map(p => {
+    return all.map(p => {
       if (p.computed_relation) return p;
       if (p.id === self.id) return {...p, computed_relation: 'Self' };
       if (p.id === self.father_id) return {...p, computed_relation: 'Father' };
@@ -77,51 +76,127 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
       if (self.father_id && p.father_id === self.father_id && p.id!== self.id) return {...p, computed_relation: 'Sibling' };
       if (self.mother_id && p.mother_id === self.mother_id && p.id!== self.id) return {...p, computed_relation: 'Sibling' };
       if (p.father_id === self.id || p.mother_id === self.id) return {...p, computed_relation: 'Child' };
-      return p;
+      if (p.owner_user_id === self.id || p.owner_user_id === self.owner_user_id) {
+        return {...p, computed_relation: p.category==='Fnd'? 'Friend' : 'Family' };
+      }
+      if (p.owner_user_id === currentUserId) {
+        return {...p, computed_relation: p.category==='Fnd'? 'Friend' : 'Child' };
+      }
+      return {...p, computed_relation: 'Family'};
     });
   };
 
+  // FIXED FOR ABDC: if profile is Friend (Fnd), load owner's full tree
   const loadTree = async (profileId, shouldUpdateDisplay = false) => {
+    let realProfileId = profileId;
+    let ownerId = null;
     try {
-      const res = await fetch(`/api/family-tree/${profileId}`);
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const fmlOnly = onlyFml(data);
-        const effective = fmlOnly.length > 0? fmlOnly : data;
-        setTreeProfiles(effective);
-        const self = effective.find(p => p.computed_relation === 'Self' || p.id === profileId) || effective[0];
-        setTreeSelf(self);
-        if (shouldUpdateDisplay) setDisplayProfile(self);
-        return;
+      const maybeUser = await fetch(`/api/users/${profileId}`).then(r=>r.json()).catch(()=>null);
+      if(maybeUser?.profile_id){ realProfileId = maybeUser.profile_id; ownerId = maybeUser.invited_by_user_id || maybeUser.owner_user_id || null; }
+      else {
+        const profCheck = await fetch(`/api/profiles/${profileId}`).then(r=>r.json()).catch(()=>null);
+        if(profCheck?.id){
+          realProfileId = profCheck.id;
+          ownerId = profCheck.owner_user_id || null;
+          // If this profile is friend, we need its owner's tree
+          if(profCheck.category==='Fnd' && profCheck.owner_user_id && profCheck.owner_user_id!==currentUserId){
+            ownerId = profCheck.owner_user_id;
+          }
+        } else {
+          const ownedTmp = await fetch(`/api/profiles?owner_user_id=${profileId}`).then(r=>r.json()).catch(()=>[]);
+          if(ownedTmp?.[0]?.id){ realProfileId = ownedTmp[0].id; ownerId = ownedTmp[0].owner_user_id || null; }
+        }
       }
-    } catch(e) {}
-    try {
-      const single = await fetch(`/api/profiles/${profileId}`).then(r=>r.json());
-      if (single?.id) {
-        const node = {...single, computed_relation: 'Self' };
-        setTreeProfiles([node]);
-        setTreeSelf(node);
-        if (shouldUpdateDisplay) setDisplayProfile(node);
-        return;
-      }
-    } catch(e) {}
-    if (profileId === currentUserId || profileId === loggedProfile?.id) {
-      const all = await fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).catch(()=>[]);
-      const fmlAll = onlyFml(all);
-      const self = fmlAll?.find(p=>p.id===profileId) || fmlAll?.find(p=>p.father_id===null && p.mother_id===null) || fmlAll?.[0] || null;
-      const withRelations = computeFallbackRelations(fmlAll || [], self);
-      setTreeProfiles(withRelations);
-      setTreeSelf(self);
-      if (shouldUpdateDisplay) setDisplayProfile(self);
+    } catch(e){}
+
+    // If Abdc is friend, load Sarath (ur001) tree directly
+    if(ownerId && ownerId!==currentUserId){
+      try{
+        const ownerTree = await fetch(`/api/family-tree/${ownerId}`).then(r=>r.json()).catch(()=>[]);
+        const ownerProfiles = await fetch(`/api/profiles?owner_user_id=${ownerId}`).then(r=>r.json()).catch(()=>[]);
+        const ownerGroups = await fetch(`/api/group-members?owner_user_id=${ownerId}`).then(r=>r.json()).catch(()=>[]);
+        let combined = [...(Array.isArray(ownerTree)?ownerTree:[]),...(Array.isArray(ownerProfiles)?ownerProfiles:[]),...(Array.isArray(ownerGroups)?ownerGroups.map(x=>x.profile||x):[])];
+        // also include self
+        const selfProf = await fetch(`/api/profiles/${realProfileId}`).then(r=>r.json()).catch(()=>null);
+        if(selfProf?.id) combined.push(selfProf);
+        const uniq = Array.from(new Map(combined.map(p=>[p.id,p])).values());
+        if(uniq.length>1){
+          const selfNode = uniq.find(p=>p.id===realProfileId) || uniq[0];
+          const finalList = uniq.map(p=> p.id===realProfileId? {...p, computed_relation:'Self'} : p);
+          setTreeProfiles(computeFallbackRelations(finalList, selfNode));
+          setTreeSelf(selfNode);
+          if (shouldUpdateDisplay) setDisplayProfile(selfNode);
+          return;
+        }
+      }catch(e){}
     }
+
+    try {
+      const res = await fetch(`/api/family-tree/${realProfileId}`);
+      const data = await res.json();
+      let effective = Array.isArray(data)? data : [];
+      if(effective.length <= 1){
+        try{
+          const ownedRes = await fetch(`/api/profiles?owner_user_id=${currentUserId}`);
+          const ownedData = await ownedRes.json();
+          if(Array.isArray(ownedData) && ownedData.length > 0){
+            const existingIds = new Set(effective.map(p=>p.id || p.profile_id));
+            ownedData.forEach(raw=>{
+              const p = raw.profile || raw;
+              if(p && p.id &&!existingIds.has(p.id)){
+                let rel = 'Family';
+                if(p.father_id === realProfileId || p.mother_id === realProfileId) rel = 'Child';
+                else if(p.id === realProfileId) rel = 'Self';
+                else if(p.category === 'Fnd') rel = 'Friend';
+                effective.push({...p, computed_relation: rel});
+                existingIds.add(p.id);
+              }
+            });
+          }
+          // fallback to ur001 for temp users
+          if(effective.length<=1){
+            const fallbackOwner = ownerId || 'ur001';
+            const urRes = await fetch(`/api/profiles?owner_user_id=${fallbackOwner}`).then(r=>r.json()).catch(()=>[]);
+            const urTree = await fetch(`/api/family-tree/${fallbackOwner}`).then(r=>r.json()).catch(()=>[]);
+            const extra = [...(Array.isArray(urRes)?urRes:[]),...(Array.isArray(urTree)?urTree:[])];
+            const existingIds2 = new Set(effective.map(p=>p.id));
+            extra.forEach(raw=>{
+              const p = raw.profile || raw;
+              if(p && p.id &&!existingIds2.has(p.id)){
+                effective.push(p);
+                existingIds2.add(p.id);
+              }
+            });
+          }
+        }catch(e){ console.log('merge failed',e); }
+      }
+      if(effective.length > 0){
+        const uniq = Array.from(new Map(effective.map(p=>[p.id,p])).values());
+        const selfNode = uniq.find(p => p.id === realProfileId) || uniq.find(p => p.computed_relation === 'Self') || uniq[0];
+        const finalList = computeFallbackRelations(uniq, selfNode);
+        setTreeProfiles(finalList);
+        setTreeSelf(selfNode);
+        if (shouldUpdateDisplay) setDisplayProfile(selfNode);
+        return;
+      }
+    } catch(e) {}
   };
 
+  // FIXED INITIAL LOAD: don't show only 1 for Fnd, load owner's tree
   useEffect(() => {
-    fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(data=>{
-      const fmlOnly = onlyFml(data);
-      const me = fmlOnly?.find(p=>p.id===currentUserId) || fmlOnly?.find(p=>p.father_id===null && p.mother_id===null) || fmlOnly?.[0];
-      setLoggedProfile(me); setDisplayProfile(me);
-      if(viewUserId===currentUserId){ if(me?.id) loadTree(me.id,false); else { setTreeProfiles(fmlOnly); setTreeSelf(me); } }
+    fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(async data=>{
+      const me = data?.find(p=>p.id===currentUserId) || data?.[0] || null;
+      setLoggedProfile(me);
+      setDisplayProfile(me);
+      if(viewUserId===currentUserId){
+        if(me?.id) {
+          // If me is friend, loadTree will handle owner fallback
+          loadTree(me.id,false);
+        } else {
+          setTreeProfiles(data||[]);
+          setTreeSelf(me);
+        }
+      }
     });
   }, [currentUserId]);
 
@@ -228,10 +303,8 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
       try {
         const res = await fetch(`/api/family-tree/${fp.id}`).then(r=>r.json());
         if (Array.isArray(res) && res.length > 0) {
-          const fmlOnly = onlyFml(res);
-          const effective = fmlOnly.length > 0? fmlOnly : res;
-          setTreeProfiles(effective);
-          const self = effective.find(p => p.computed_relation === 'Self' || p.id === fp.id) || effective[0];
+          setTreeProfiles(res);
+          const self = res.find(p => p.computed_relation === 'Self' || p.id === fp.id) || res[0];
           setTreeSelf(self);
           return;
         }
@@ -589,7 +662,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         </div>
       </div>
 
-      {/* MOBILE FIXED CHAT ICON - always on top */}
       <button
         onClick={() => setShowChatSystem(true)}
         className="fixed bottom-5 right-5 w-[56px] h-[56px] bg-black text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-[9999] hover:scale-105 transition text-[22px] md:bottom-4 md:right-4"
@@ -598,7 +670,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         💬
       </button>
 
-      {/* CHAT SYSTEM POPUP - immediate family + groups */}
       {showChatSystem && (
         <ChatSystem
           self={loggedProfile}

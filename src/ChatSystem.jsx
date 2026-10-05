@@ -12,7 +12,6 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
   const [groupCounts, setGroupCounts] = useState({});
   const [myFamily, setMyFamily] = useState([]);
   const [myGroups, setMyGroups] = useState([]);
-  // VIDEO CALL NEW STATES
   const [incomingCall, setIncomingCall] = useState(null);
   const [currentCallId, setCurrentCallId] = useState(null);
   const [callStatus, setCallStatus] = useState('');
@@ -91,7 +90,6 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     return () => { clearInterval(id1); clearInterval(id2); window.removeEventListener('beforeunload', goOffline); window.removeEventListener('pagehide', goOffline); goOffline(); };
   }, [self?.id]);
 
-  // === NEW: INCOMING CALL POLLING FOR THANMAYEE ===
   useEffect(() => {
     if(!chatUserId) return;
     const checkIncoming = async () => {
@@ -100,7 +98,6 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
         if(call && call.id && call.caller_id!== chatUserId){
           setIncomingCall(call);
           setCurrentCallId(call.id);
-          // play ringing
           if(ringingAudioRef.current){ ringingAudioRef.current.play().catch(()=>{}); }
         }
       }catch{}
@@ -110,15 +107,18 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     return ()=> clearInterval(id);
   }, [chatUserId]);
 
-  // === NEW: IF CALLER WAITING FOR ACCEPT ===
   useEffect(() => {
     if(!currentCallId || incomingCall) return;
     const checkAccepted = async () => {
       try{
         const c = await fetch(`/api/call/${currentCallId}`).then(r=>r.json());
         if(c?.status === 'accepted' && c.sdp_answer){
-          await peerRef.current?.setRemoteDescription(new RTCSessionDescription(JSON.parse(c.sdp_answer)));
-          setCallStatus('connected');
+          if(peerRef.current && peerRef.current.signalingState!== 'closed'){
+            try{
+              await peerRef.current.setRemoteDescription(new RTCSessionDescription(JSON.parse(c.sdp_answer)));
+              setCallStatus('connected');
+            }catch(e){ console.log('setRemote answer err', e); }
+          }
         }
         if(c?.status === 'rejected'){ endCall(); alert('Call rejected'); }
         if(c?.status === 'ended'){ endCall(); }
@@ -130,44 +130,67 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
 
   const isOnline = (id) => onlineIds.has(id);
 
+  // --- FIX #3 VIDEO CALL ---
   const createPeer = () => {
-    const pc = new RTCPeerConnection({ iceServers: [{urls:'stun:stun.l.google.com:19302'}] });
-    pc.onicecandidate = () => {};
-    pc.ontrack = (e) => { if(remoteVideoRef.current) remoteVideoRef.current.srcObject = e.streams[0]; };
+    const pc = new RTCPeerConnection({ iceServers: [{urls:'stun:stun.l.google.com:19302'}, {urls:'stun:stun1.l.google.com:19302'}] });
+    pc.onicecandidate = (e) => {
+      // We use non-trickle for now, offer/answer contains candidates after gathering
+      if(!e.candidate) console.log('ICE gathering complete');
+    };
+    pc.ontrack = (e) => {
+      console.log('REMOTE TRACK RECEIVED', e.streams[0]);
+      if(remoteVideoRef.current){
+        remoteVideoRef.current.srcObject = e.streams[0];
+        remoteVideoRef.current.play().catch(()=>{});
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      console.log('PC state', pc.connectionState);
+      if(pc.connectionState === 'connected') setCallStatus('connected');
+      if(pc.connectionState === 'failed' || pc.connectionState === 'disconnected') setCallStatus('reconnecting...');
+    };
     return pc;
   };
 
   const startCall = async (target) => {
-    const targetId = target.id || target.profile_id;
-    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-    if(localVideoRef.current) localVideoRef.current.srcObject = stream;
-    const pc = createPeer();
-    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
-    peerRef.current = pc;
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    // request call with sdp_offer
-    const res = await fetch('/api/call/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ caller_id: chatUserId, caller_name: self?.display_name || 'User', receiver_id: targetId, sdp_offer: JSON.stringify(offer) }) }).then(r=>r.json());
-    setCurrentCallId(res.callId);
-    setInCall({type:'video', name: target.display_name || target.name});
-    setCallStatus('ringing... waiting for Thanmayee to accept');
+    try{
+      const targetId = target.id || target.profile_id;
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480}, audio:true });
+      if(localVideoRef.current){ localVideoRef.current.srcObject = stream; localVideoRef.current.play().catch(()=>{}); }
+      const pc = createPeer();
+      stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+      peerRef.current = pc;
+      const offer = await pc.createOffer({offerToReceiveAudio:true, offerToReceiveVideo:true});
+      await pc.setLocalDescription(offer);
+      // Wait a bit for ICE to gather (non-trickle)
+      await new Promise(r=>setTimeout(r, 800));
+      const finalOffer = pc.localDescription;
+      const res = await fetch('/api/call/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ caller_id: chatUserId, caller_name: self?.display_name || 'User', receiver_id: targetId, sdp_offer: JSON.stringify(finalOffer) }) }).then(r=>r.json());
+      setCurrentCallId(res.callId);
+      setInCall({type:'video', name: target.display_name || target.name});
+      setCallStatus('ringing... waiting to accept');
+    }catch(err){ alert('Camera permission needed: '+err.message); }
   };
 
   const acceptCall = async () => {
     if(!incomingCall) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-    if(localVideoRef.current) localVideoRef.current.srcObject = stream;
-    const pc = createPeer();
-    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
-    peerRef.current = pc;
-    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(incomingCall.sdp_offer)));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await fetch('/api/call/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: incomingCall.id, sdp_answer: JSON.stringify(answer) }) });
-    setInCall({type:'video', name: incomingCall.caller_name});
-    setCallStatus('connected');
-    setIncomingCall(null);
-    if(ringingAudioRef.current){ ringingAudioRef.current.pause(); ringingAudioRef.current.currentTime=0; }
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480}, audio:true });
+      if(localVideoRef.current){ localVideoRef.current.srcObject = stream; localVideoRef.current.play().catch(()=>{}); }
+      const pc = createPeer();
+      stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+      peerRef.current = pc;
+      await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(incomingCall.sdp_offer)));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await new Promise(r=>setTimeout(r, 800));
+      const finalAnswer = pc.localDescription;
+      await fetch('/api/call/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: incomingCall.id, sdp_answer: JSON.stringify(finalAnswer) }) });
+      setInCall({type:'video', name: incomingCall.caller_name});
+      setCallStatus('connected');
+      setIncomingCall(null);
+      if(ringingAudioRef.current){ ringingAudioRef.current.pause(); ringingAudioRef.current.currentTime=0; }
+    }catch(err){ alert('Camera permission needed: '+err.message); }
   };
 
   const rejectCall = async () => {
@@ -223,13 +246,17 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     else { activeChat.members?.forEach(m=>{ if(m.id!==chatUserId) sendNotifyIfOffline(m.id, textToSend); }); }
   };
 
+  // --- FIX #2 CHAT UPLOAD - NO LONGER UPDATES PROFILE ---
   const sendAttachment = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     const fd = new FormData(); fd.append('file', file);
-    const up = await fetch(`/api/upload?profileId=${currentUserId}`, { method: 'POST', body: fd }).then(r => r.json());
+    // FIX: Use chat upload endpoint, NOT /api/upload
+    const up = await fetch(`/api/chat/upload/document`, { method: 'POST', body: fd }).then(r => r.json()).catch(()=>({}));
+    if(!up.url){ alert('Upload failed'); return; }
     const payload = { sender_id: chatUserId, sender_name: self?.display_name, text: up.url, type: file.type.startsWith('image/')? 'image' : 'file', fileName: file.name, direct_to: activeChat.type === 'direct'? activeChat.id : null, group_id: activeChat.type === 'group'? activeChat.id : null };
     setMessages(prev => [...prev, payload]);
     await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    e.target.value = '';
   };
 
   const startVoice = async () => {
@@ -239,15 +266,18 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
     mediaRecorderRef.current.onstop = async () => {
       const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
       const fd = new FormData(); fd.append('file', blob, 'voice.webm');
-      const up = await fetch(`/api/upload?profileId=${currentUserId}`, { method: 'POST', body: fd }).then(r => r.json());
+      // FIX: Use voice upload endpoint, NOT /api/upload
+      const up = await fetch(`/api/chat/upload/voice`, { method: 'POST', body: fd }).then(r => r.json()).catch(()=>({}));
+      if(!up.url){ alert('Voice upload failed'); return; }
       const payload = { sender_id: chatUserId, sender_name: self?.display_name, text: up.url, type: 'voice', direct_to: activeChat.type === 'direct'? activeChat.id : null, group_id: activeChat.type === 'group'? activeChat.id : null };
       setMessages(prev => [...prev, payload]);
       await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      stream.getTracks().forEach(t=>t.stop());
     };
     mediaRecorderRef.current.start(); setRecording(true);
   };
   const stopVoice = () => { mediaRecorderRef.current?.stop(); setRecording(false); };
-  useEffect(() => { if (inCall && localVideoRef.current &&!localVideoRef.current.srcObject) { navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => localVideoRef.current.srcObject = s).catch(()=>{}); } }, [inCall]);
+  useEffect(() => { if (inCall && localVideoRef.current &&!localVideoRef.current.srcObject) { navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => { localVideoRef.current.srcObject = s; localVideoRef.current.play().catch(()=>{}); }).catch(()=>{}); } }, [inCall]);
 
   return (
     <div className="fixed inset-0 md:inset-auto md:bottom-[86px] md:right-4 z-[9999] flex items-end justify-center md:justify-end bg-black/30 md:bg-transparent p-0 md:p-0" style={{fontFamily:'Plus Jakarta Sans'}}>
@@ -276,7 +306,6 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
           )}
         </div>
 
-        {/* INCOMING CALL POPUP FOR THANMAYEE */}
         {incomingCall && (
           <div className="absolute inset-0 bg-black/80 z-[100] flex flex-col items-center justify-center p-6 text-white">
             <audio ref={ringingAudioRef} loop src="https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg" />
@@ -293,8 +322,8 @@ export default function ChatSystem({ self, allProfiles = [], groups = [], groupM
         {inCall && (
           <div className="absolute inset-0 bg-black z-50 flex flex-col">
             <div className="flex-1 relative">
-              <video ref={remoteVideoRef} autoPlay className="w-full h-full object-cover bg-black" />
-              <video ref={localVideoRef} autoPlay muted className="absolute bottom-4 right-4 w-24 h-32 object-cover rounded-[10px] border-2 border-white" />
+              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover bg-black" />
+              <video ref={localVideoRef} autoPlay playsInline muted className="absolute bottom-4 right-4 w-24 h-32 object-cover rounded-[10px] border-2 border-white" />
               <p className="absolute top-4 left-4 bg-black/50 text-white text-[11px] px-2 py-1 rounded">{callStatus || 'Connected'} - {inCall.name}</p>
             </div>
             <div className="h-[90px] bg-[#111] flex items-center justify-center gap-6">
