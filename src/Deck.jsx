@@ -51,138 +51,182 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
   });
 
   const [showChatSystem, setShowChatSystem] = useState(false);
-
   const [chatOpen, setChatOpen] = useState(false);
   const [chatWith, setChatWith] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
 
-  const onlyFml = (arr) => (arr||[]);
+  // FIXED: Show all valid profiles - for Nirmal 6 members
+  const onlyFml = (arr) => (arr||[]).filter(p => p && p.id);
   const getDisplayName = (p) => {
     if(!p) return 'Unknown';
     const n = p.display_name || p.name || '';
     if(n &&!n.startsWith('pr_') && n.trim()!=='') return n;
     return p.display_name || p.id;
   };
+
   const computeFallbackRelations = (all, self) => {
     if (!self) return onlyFml(all);
     return all.map(p => {
-      if (p.computed_relation) return p;
-      if (p.id === self.id) return {...p, computed_relation: 'Self' };
-      if (p.id === self.father_id) return {...p, computed_relation: 'Father' };
-      if (p.id === self.mother_id) return {...p, computed_relation: 'Mother' };
-      if (p.spouse_id && (p.id === self.spouse_id || p.spouse_id === self.id)) return {...p, computed_relation: 'Spouse' };
-      if (self.father_id && p.father_id === self.father_id && p.id!== self.id) return {...p, computed_relation: 'Sibling' };
-      if (self.mother_id && p.mother_id === self.mother_id && p.id!== self.id) return {...p, computed_relation: 'Sibling' };
-      if (p.father_id === self.id || p.mother_id === self.id) return {...p, computed_relation: 'Child' };
-      if (p.owner_user_id === self.id || p.owner_user_id === self.owner_user_id) {
-        return {...p, computed_relation: p.category==='Fnd'? 'Friend' : 'Family' };
-      }
-      if (p.owner_user_id === currentUserId) {
-        return {...p, computed_relation: p.category==='Fnd'? 'Friend' : 'Child' };
-      }
+      const pid = String(p.id);
+      const sid = String(self.id);
+      if (pid === sid) return {...p, computed_relation: 'Self' };
+      if (String(p.id) === String(self.father_id)) return {...p, computed_relation: 'Father' };
+      if (String(p.id) === String(self.mother_id)) return {...p, computed_relation: 'Mother' };
+      if (self.spouse_id && String(self.spouse_id) === pid) return {...p, computed_relation: 'Spouse' };
+      if (p.spouse_id && String(p.spouse_id) === sid) return {...p, computed_relation: 'Spouse' };
+      const isSpouseViaChild = all.some(c =>
+        (String(c.father_id) === sid && String(c.mother_id) === pid) ||
+        (String(c.mother_id) === sid && String(c.father_id) === pid)
+      );
+      if (isSpouseViaChild) return {...p, computed_relation: 'Spouse' };
+      if (self.father_id && String(p.father_id) === String(self.father_id) && pid!== sid) return {...p, computed_relation: 'Sibling' };
+      if (self.mother_id && String(p.mother_id) === String(self.mother_id) && pid!== sid) return {...p, computed_relation: 'Sibling' };
+      if (String(p.father_id) === sid || String(p.mother_id) === sid) return {...p, computed_relation: 'Child' };
       return {...p, computed_relation: 'Family'};
     });
   };
 
-  // FIXED FOR ABDC: if profile is Friend (Fnd), load owner's full tree
+  // FINAL FIXED loadTree - FOR NIRMAL FRIEND (pr_ owner) - SHOWS 6 MEMBERS
   const loadTree = async (profileId, shouldUpdateDisplay = false) => {
     let realProfileId = profileId;
-    let ownerId = null;
     try {
       const maybeUser = await fetch(`/api/users/${profileId}`).then(r=>r.json()).catch(()=>null);
-      if(maybeUser?.profile_id){ realProfileId = maybeUser.profile_id; ownerId = maybeUser.invited_by_user_id || maybeUser.owner_user_id || null; }
+      if(maybeUser?.profile_id){ realProfileId = maybeUser.profile_id; }
       else {
         const profCheck = await fetch(`/api/profiles/${profileId}`).then(r=>r.json()).catch(()=>null);
-        if(profCheck?.id){
-          realProfileId = profCheck.id;
-          ownerId = profCheck.owner_user_id || null;
-          // If this profile is friend, we need its owner's tree
-          if(profCheck.category==='Fnd' && profCheck.owner_user_id && profCheck.owner_user_id!==currentUserId){
-            ownerId = profCheck.owner_user_id;
-          }
-        } else {
-          const ownedTmp = await fetch(`/api/profiles?owner_user_id=${profileId}`).then(r=>r.json()).catch(()=>[]);
-          if(ownedTmp?.[0]?.id){ realProfileId = ownedTmp[0].id; ownerId = ownedTmp[0].owner_user_id || null; }
-        }
+        if(profCheck?.id){ realProfileId = profCheck.id; }
       }
     } catch(e){}
 
-    // If Abdc is friend, load Sarath (ur001) tree directly
-    if(ownerId && ownerId!==currentUserId){
-      try{
-        const ownerTree = await fetch(`/api/family-tree/${ownerId}`).then(r=>r.json()).catch(()=>[]);
-        const ownerProfiles = await fetch(`/api/profiles?owner_user_id=${ownerId}`).then(r=>r.json()).catch(()=>[]);
-        const ownerGroups = await fetch(`/api/group-members?owner_user_id=${ownerId}`).then(r=>r.json()).catch(()=>[]);
-        let combined = [...(Array.isArray(ownerTree)?ownerTree:[]),...(Array.isArray(ownerProfiles)?ownerProfiles:[]),...(Array.isArray(ownerGroups)?ownerGroups.map(x=>x.profile||x):[])];
-        // also include self
-        const selfProf = await fetch(`/api/profiles/${realProfileId}`).then(r=>r.json()).catch(()=>null);
-        if(selfProf?.id) combined.push(selfProf);
-        const uniq = Array.from(new Map(combined.map(p=>[p.id,p])).values());
-        if(uniq.length>1){
-          const selfNode = uniq.find(p=>p.id===realProfileId) || uniq[0];
-          const finalList = uniq.map(p=> p.id===realProfileId? {...p, computed_relation:'Self'} : p);
-          setTreeProfiles(computeFallbackRelations(finalList, selfNode));
-          setTreeSelf(selfNode);
-          if (shouldUpdateDisplay) setDisplayProfile(selfNode);
-          return;
-        }
-      }catch(e){}
-    }
-
     try {
-      const res = await fetch(`/api/family-tree/${realProfileId}`);
-      const data = await res.json();
-      let effective = Array.isArray(data)? data : [];
-      if(effective.length <= 1){
+      const selfProf = await fetch(`/api/profiles/${realProfileId}`).then(r=>r.json()).catch(()=>null);
+      if(!selfProf?.id) throw new Error('no self');
+      const ownerToLoad = selfProf.owner_user_id || realProfileId;
+      console.log('[loadTree] self:', realProfileId, 'ownerToLoad:', ownerToLoad, 'name:', selfProf.display_name);
+
+      let merged = [];
+      const addUnique = (list) => {
+        list.forEach(p=>{
+          if(p?.id &&!merged.find(m=>String(m.id)===String(p.id))) merged.push(p);
+        });
+      };
+
+      const fetchList = async (url) => {
         try{
-          const ownedRes = await fetch(`/api/profiles?owner_user_id=${currentUserId}`);
-          const ownedData = await ownedRes.json();
-          if(Array.isArray(ownedData) && ownedData.length > 0){
-            const existingIds = new Set(effective.map(p=>p.id || p.profile_id));
-            ownedData.forEach(raw=>{
-              const p = raw.profile || raw;
-              if(p && p.id &&!existingIds.has(p.id)){
-                let rel = 'Family';
-                if(p.father_id === realProfileId || p.mother_id === realProfileId) rel = 'Child';
-                else if(p.id === realProfileId) rel = 'Self';
-                else if(p.category === 'Fnd') rel = 'Friend';
-                effective.push({...p, computed_relation: rel});
-                existingIds.add(p.id);
-              }
-            });
-          }
-          // fallback to ur001 for temp users
-          if(effective.length<=1){
-            const fallbackOwner = ownerId || 'ur001';
-            const urRes = await fetch(`/api/profiles?owner_user_id=${fallbackOwner}`).then(r=>r.json()).catch(()=>[]);
-            const urTree = await fetch(`/api/family-tree/${fallbackOwner}`).then(r=>r.json()).catch(()=>[]);
-            const extra = [...(Array.isArray(urRes)?urRes:[]),...(Array.isArray(urTree)?urTree:[])];
-            const existingIds2 = new Set(effective.map(p=>p.id));
-            extra.forEach(raw=>{
-              const p = raw.profile || raw;
-              if(p && p.id &&!existingIds2.has(p.id)){
-                effective.push(p);
-                existingIds2.add(p.id);
-              }
-            });
-          }
-        }catch(e){ console.log('merge failed',e); }
+          const r = await fetch(url);
+          if(!r.ok) return [];
+          const data = await r.json().catch(()=>[]);
+          if(Array.isArray(data)) return data.map(v=>v.profile||v).filter(Boolean);
+          if(data?.profiles && Array.isArray(data.profiles)) return data.profiles;
+          return data?.id? [data] : [];
+        }catch{ return []; }
+      };
+
+      addUnique([selfProf]);
+
+      // FIXED: Fetch ALL then filter by ownerToLoad
+      let allProfilesRaw = await fetchList(`/api/profiles`);
+      console.log('[loadTree] allProfilesRaw count (all):', allProfilesRaw.length);
+      if(allProfilesRaw.length===0){
+        console.log('[loadTree] retry owner filter:', ownerToLoad);
+        allProfilesRaw = await fetchList(`/api/profiles?owner_user_id=${encodeURIComponent(ownerToLoad)}`);
+        console.log('[loadTree] allProfilesRaw count (filtered):', allProfilesRaw.length);
       }
-      if(effective.length > 0){
-        const uniq = Array.from(new Map(effective.map(p=>[p.id,p])).values());
-        const selfNode = uniq.find(p => p.id === realProfileId) || uniq.find(p => p.computed_relation === 'Self') || uniq[0];
-        const finalList = computeFallbackRelations(uniq, selfNode);
-        setTreeProfiles(finalList);
-        setTreeSelf(selfNode);
-        if (shouldUpdateDisplay) setDisplayProfile(selfNode);
-        return;
+
+      if(allProfilesRaw.length>0){
+        const byOwner = allProfilesRaw.filter(p=> String(p.owner_user_id)===String(ownerToLoad));
+        console.log('[loadTree] byOwner count for', ownerToLoad, ':', byOwner.length, byOwner.map(x=>x.display_name));
+        if(byOwner.length>0){
+          addUnique(byOwner);
+        } else {
+          addUnique(allProfilesRaw);
+        }
       }
-    } catch(e) {}
+
+      for(const fid of [selfProf.father_id, selfProf.mother_id]){
+        if(fid){
+          try{
+            const f = await fetch(`/api/profiles/${fid}`).then(r=>r.json()).catch(()=>null);
+            if(f?.id) addUnique([f]);
+            else {
+              const fromAll = allProfilesRaw.find(p=> String(p.id)===String(fid));
+              if(fromAll) addUnique([fromAll]);
+            }
+          }catch{}
+        }
+      }
+
+      const childrenByFather = await fetchList(`/api/profiles?father_id=${realProfileId}`);
+      const childrenByMother = await fetchList(`/api/profiles?mother_id=${realProfileId}`);
+      addUnique([...childrenByFather,...childrenByMother]);
+      const localChildren = allProfilesRaw.filter(p=> String(p.father_id)===String(realProfileId) || String(p.mother_id)===String(realProfileId));
+      addUnique(localChildren);
+
+      if(selfProf.father_id){
+        const sibs = await fetchList(`/api/profiles?father_id=${selfProf.father_id}`);
+        addUnique(sibs.filter(p=>String(p.id)!==String(realProfileId)));
+        const localSibsF = allProfilesRaw.filter(p=> String(p.father_id)===String(selfProf.father_id) && String(p.id)!==String(realProfileId));
+        addUnique(localSibsF);
+      }
+      if(selfProf.mother_id){
+        const sibsM = await fetchList(`/api/profiles?mother_id=${selfProf.mother_id}`);
+        addUnique(sibsM.filter(p=>String(p.id)!==String(realProfileId)));
+        const localSibsM = allProfilesRaw.filter(p=> String(p.mother_id)===String(selfProf.mother_id) && String(p.id)!==String(realProfileId));
+        addUnique(localSibsM);
+      }
+
+      const owned = await fetchList(`/api/profiles?owner_user_id=${encodeURIComponent(ownerToLoad)}`);
+      addUnique(owned);
+
+      const familyTree = await fetchList(`/api/family-tree/${realProfileId}`);
+      addUnique(familyTree);
+
+      const currentChildren = merged.filter(p=> String(p.father_id)===String(realProfileId) || String(p.mother_id)===String(realProfileId));
+      const spouseIds = new Set();
+      currentChildren.forEach(c=>{
+        if(String(c.father_id)===String(realProfileId) && c.mother_id) spouseIds.add(String(c.mother_id));
+        if(String(c.mother_id)===String(realProfileId) && c.father_id) spouseIds.add(String(c.father_id));
+      });
+      for(const sid of spouseIds){
+        if(!merged.find(m=>String(m.id)===sid)){
+          try{
+            const s = await fetch(`/api/profiles/${sid}`).then(r=>r.json()).catch(()=>null);
+            if(s?.id) addUnique([s]);
+            else {
+              const fromAll = allProfilesRaw.find(p=> String(p.id)===String(sid));
+              if(fromAll) addUnique([fromAll]);
+            }
+          }catch{}
+        }
+      }
+
+      if(!merged.find(p=>String(p.id)===String(realProfileId))) addUnique([selfProf]);
+
+      if (String(ownerToLoad)!== 'ur001') {
+        merged = merged.filter(p=> String(p.id)!=='ur001');
+      } else {
+        if(!merged.find(p=>String(p.id)==='ur001')){
+          try{
+            const ur = await fetch(`/api/profiles/ur001`).then(r=>r.json()).catch(()=>null);
+            if(ur?.id) addUnique([ur]);
+          }catch{}
+        }
+      }
+
+      const uniq = Array.from(new Map(merged.map(p=>[String(p.id),p])).values());
+      console.log('[loadTree] FINAL merged:', uniq.length, uniq.map(p=>p.display_name));
+      const finalList = computeFallbackRelations(uniq, selfProf);
+      setTreeProfiles(finalList);
+      setTreeSelf(selfProf);
+      if (shouldUpdateDisplay) setDisplayProfile(selfProf);
+      return;
+    } catch(e){
+      console.log('loadTree failed', e);
+    }
   };
 
-  // FIXED INITIAL LOAD: don't show only 1 for Fnd, load owner's tree
   useEffect(() => {
     fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(async data=>{
       const me = data?.find(p=>p.id===currentUserId) || data?.[0] || null;
@@ -190,7 +234,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
       setDisplayProfile(me);
       if(viewUserId===currentUserId){
         if(me?.id) {
-          // If me is friend, loadTree will handle owner fallback
           loadTree(me.id,false);
         } else {
           setTreeProfiles(data||[]);
@@ -269,11 +312,12 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     try{ await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(msg) }); }catch{}
   };
 
-  const father = treeProfiles.find(p=>p.computed_relation==='Father' || (treeSelf && p.id===treeSelf.father_id));
-  const mother = treeProfiles.find(p=>p.computed_relation==='Mother' || (treeSelf && p.id===treeSelf.mother_id));
+  const father = treeProfiles.find(p=>p.computed_relation==='Father');
+  const mother = treeProfiles.find(p=>p.computed_relation==='Mother');
   const spouse = treeProfiles.find(p=>p.computed_relation==='Spouse');
   const siblings = treeProfiles.filter(p=>p.computed_relation==='Sibling');
   const children = treeProfiles.filter(p=>p.computed_relation==='Child');
+  const extraFamily = treeProfiles.filter(p=>p.computed_relation==='Family');
 
   const handleNodeClick = (p, isCenter) => {
     if(!p) return;
@@ -423,7 +467,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
 
   return (
     <div className="min-h-screen w-full bg-[#f2efe8]" style={{fontFamily:'Plus Jakarta Sans'}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0;-webkit-overflow-scrolling:touch}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}@media(max-width:768px){.family-scroll{height:520px;overflow:auto!important}.family-scroll svg{overflow:visible!important}}.scrollbar-hide::-webkit-scrollbar{display:none}.scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');.card{background:#fffefb;border:1px solid #e9e2d6;border-radius:10px}.tree-node{width:64px;height:64px;}.tree-node-big{width:76px;height:76px;font-size:22px;}.tree-label{font-size:10px;}.family-scroll{width:100%;height:540px;overflow:auto;display:flex;justify-content:flex-start;align-items:flex-start;position:relative;background:#fffefb;scrollbar-width:thin;scrollbar-color:#c9ad83 #f8f5f0;-webkit-overflow-scrolling;touch}.family-scroll::-webkit-scrollbar{width:8px;height:8px}.family-scroll::-webkit-scrollbar-thumb{background:#c9ad83;border-radius:10px;border:2px solid #fffefb}.family-scroll::-webkit-scrollbar-track{background:#f8f5f0}@media(max-width:768px){.family-scroll{height:520px;overflow:auto!important}.family-scroll svg{overflow:visible!important}}.scrollbar-hide::-webkit-scrollbar{display:none}.scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}`}</style>
 
       <CommonHeader
         page="deck"
@@ -500,7 +544,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
                     const shiftY = minTop - 20;
                     const canvasW = Math.max(500, 180 + siblings.length*110 + children.length*80) + 64;
                     const canvasH = hasParents? 552 : (hasSibs? 420 : 360);
-                    const isSingle = treeProfiles.length===1;
+                    const isSingle = treeProfiles.length<=1;
                     if(isSingle){
                       return (<div className="flex items-center justify-center w-full h-[400px]"><Node p={treeSelf} big /></div>);
                     }
@@ -572,6 +616,15 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
                     <p className="text-[10px] text-gray-500 mb-3">Level {treeDepth} - Unlimited tree ({allProfiles.length} members)</p>
                     <div className="flex flex-wrap gap-5">
                       {allProfiles.map(p=><Node key={p.id} p={p} />)}
+                    </div>
+                  </div>
+                )}
+                {/* NEW: Show extra Family members for Nirmal case */}
+                {treeDepth===0 && extraFamily.length>0 && (
+                  <div className="absolute bottom-2 left-2 right-2 bg-[#fffefb] border-t border-[#e9e2d6] pt-2">
+                    <p className="text-[10px] font-bold text-gray-500 mb-1">Extended Family ({extraFamily.length})</p>
+                    <div className="flex gap-3 flex-wrap">
+                      {extraFamily.map(p=><Node key={p.id} p={p} />)}
                     </div>
                   </div>
                 )}
@@ -662,23 +715,9 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
         </div>
       </div>
 
-      <button
-        onClick={() => setShowChatSystem(true)}
-        className="fixed bottom-5 right-5 w-[56px] h-[56px] bg-black text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-[9999] hover:scale-105 transition text-[22px] md:bottom-4 md:right-4"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        💬
-      </button>
+      <button onClick={() => setShowChatSystem(true)} className="fixed bottom-5 right-5 w-[56px] h-[56px] bg-black text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-[9999] hover:scale-105 transition text-[22px] md:bottom-4 md:right-4" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>💬</button>
 
-      {showChatSystem && (
-        <ChatSystem
-          self={loggedProfile}
-          allProfiles={allProfiles}
-          groups={myGroups}
-          groupMembers={flatGroupMembers.length? flatGroupMembers : Object.entries(groupMembersMap).flatMap(([gid, ms]) => ms.map(m=>({group_id: gid, profile_id: m.id})))}
-          onClose={() => setShowChatSystem(false)}
-        />
-      )}
+      {showChatSystem && (<ChatSystem self={loggedProfile} allProfiles={allProfiles} groups={myGroups} groupMembers={flatGroupMembers.length? flatGroupMembers : Object.entries(groupMembersMap).flatMap(([gid, ms]) => ms.map(m=>({group_id: gid, profile_id: m.id})))} onClose={() => setShowChatSystem(false)} />)}
 
       {chatOpen && chatWith &&!showChatSystem && (
         <div className="fixed bottom-4 right-4 w-[320px] h-[400px] bg-white border border-[#e9e2d6] rounded-[12px] shadow-2xl flex flex-col z-[95] overflow-hidden">

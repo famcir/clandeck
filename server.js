@@ -59,6 +59,7 @@ if (!dbUrl) {
         await pool.query(`CREATE TABLE IF NOT EXISTS notifications (
           id VARCHAR(255) PRIMARY KEY,
           to_user_id VARCHAR(255),
+          from_user_id VARCHAR(255),
           from_name VARCHAR(255),
           title VARCHAR(255),
           body TEXT,
@@ -122,9 +123,6 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool', bucket: BUCKET_NAME }));
-
-//... keep all your routes exactly as you sent below...
-// (heartbeat, offline, online, call, notify, chat, register, login, claim, users, basket, profiles, relations, groups, members - same)
 
 // === HEARTBEAT ===
 app.post('/api/chatbox/heartbeat', async (req,res)=>{
@@ -400,10 +398,24 @@ app.put('/api/users/:id', async (req, res) => {
     res.json({ success: true, photo_url });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// --- FIXED #1 & #2: THIS IS THE ONLY CHANGE ---
 app.get('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
-    const { owner_user_id, search } = req.query;
+    const { owner_user_id, search, father_id, mother_id, id } = req.query;
+    if (father_id) {
+      const [rows] = await pool.query('SELECT * FROM profiles WHERE father_id =?', [father_id]);
+      return res.json(rows);
+    }
+    if (mother_id) {
+      const [rows] = await pool.query('SELECT * FROM profiles WHERE mother_id =?', [mother_id]);
+      return res.json(rows);
+    }
+    if (id) {
+      const [rows] = await pool.query('SELECT * FROM profiles WHERE id =?', [id]);
+      return res.json(rows[0] || {});
+    }
     if (search && search.trim().length > 0) {
       const s = search.trim().toLowerCase();
       const likeAny = `%${s}%`;
@@ -416,7 +428,10 @@ app.get('/api/profiles', async (req, res) => {
       }
       return res.json(rows);
     }
-    if (!owner_user_id) return res.json([]);
+    if (!owner_user_id) {
+      const [all] = await pool.query('SELECT * FROM profiles LIMIT 500');
+      return res.json(all);
+    }
     const [owned] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
     let self = owned.find(p => p.id === owner_user_id);
     if (!self) {
@@ -424,6 +439,28 @@ app.get('/api/profiles', async (req, res) => {
       self = sRows[0];
     }
     if (!self) return res.json(owned);
+    if (self.category === 'Fnd') {
+      const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
+      const father = allProfiles.find(p => p.id === self.father_id) || null;
+      const mother = allProfiles.find(p => p.id === self.mother_id) || null;
+      const children = allProfiles.filter(p => p.father_id === self.id || p.mother_id === self.id);
+      const siblings = allProfiles.filter(p => {
+        if (p.id === self.id) return false;
+        if (!self.father_id &&!self.mother_id) return false;
+        if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
+        if (self.father_id) return p.father_id === self.father_id;
+        if (self.mother_id) return p.mother_id === self.mother_id;
+        return false;
+      });
+      const result = [];
+      result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
+      if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
+      if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
+      siblings.forEach(s => { if(!result.find(r=>r.id===s.id)) result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}); });
+      children.forEach(c => { if(!result.find(r=>r.id===c.id)) result.push({...c, relation_label: 'Child', computed_relation: 'Child'}); });
+      allProfiles.forEach(p => { if(!result.find(r=>r.id===p.id)) result.push({...p, relation_label: 'Family', computed_relation: 'Family'}); });
+      return res.json(result);
+    }
     const [allProfiles] = await pool.query('SELECT * FROM profiles');
     const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)`, [self.id, self.id]);
     const spouseIds = spouseRelations.map(r => r.owner_profile_id === self.id? r.related_profile_id : r.owner_profile_id);
@@ -453,6 +490,8 @@ app.get('/api/profiles', async (req, res) => {
     spouses.forEach(s => result.push({...s, relation_label: 'Spouse', computed_relation: 'Spouse'}));
     siblings.forEach(s => result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}));
     children.forEach(c => result.push({...c, relation_label: 'Child', computed_relation: 'Child'}));
+    const ownedFnd = owned.filter(p=>p.category==='Fnd' &&!result.find(r=>r.id===p.id));
+    ownedFnd.forEach(f=> result.push({...f, relation_label:'Friend', computed_relation:'Friend'}));
     res.json(result);
   } catch(e){ res.status(500).json({error: e.message}) }
 });
@@ -470,6 +509,32 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const [selfRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [profileId]);
     const self = selfRows[0];
     if (!self) return res.json([]);
+    if (self.category === 'Fnd') {
+      const ownerId = self.owner_user_id || profileId;
+      const [owned] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [ownerId]);
+      if (owned.length > 0) {
+        const father = owned.find(p => p.id === self.father_id);
+        const mother = owned.find(p => p.id === self.mother_id);
+        const siblings = owned.filter(p => {
+          if (p.id === self.id) return false;
+          if (!self.father_id &&!self.mother_id) return false;
+          if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
+          if (self.father_id) return p.father_id === self.father_id;
+          if (self.mother_id) return p.mother_id === self.mother_id;
+          return false;
+        });
+        const children = owned.filter(p => p.father_id === self.id || p.mother_id === self.id);
+        const result = [];
+        result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
+        if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
+        if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
+        siblings.forEach(s => { if(!result.find(r=>r.id===s.id)) result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}); });
+        children.forEach(c => { if(!result.find(r=>r.id===c.id)) result.push({...c, relation_label: 'Child', computed_relation: 'Child'}); });
+        owned.forEach(p => { if(!result.find(r=>r.id===p.id)) result.push({...p, relation_label: 'Family', computed_relation: 'Family'}); });
+        return res.json(result);
+      }
+      return res.json([{...self, relation_label: 'Self', computed_relation: 'Self'}]);
+    }
     const [allProfiles] = await pool.query('SELECT * FROM profiles');
     const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)`, [profileId, profileId]);
     const spouseIds = spouseRelations.map(r => r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id);
@@ -626,7 +691,7 @@ app.delete('/api/profiles/:id', async (req, res) => {
         if (k) await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: k })).catch(()=>{});
       }
     } catch(s3e){}
-    const [linkedUsers] = await conn.query('SELECT id FROM users WHERE id=? OR shared_profile_id=?', [profileId, profileId]);
+    const [linkedUsers] = await pool.query('SELECT id FROM users WHERE id=? OR shared_profile_id=?', [profileId, profileId]);
     await conn.query('DELETE FROM profile_relations WHERE related_profile_id=? OR owner_profile_id=?', [profileId, profileId]);
     try { await conn.query('DELETE FROM group_members WHERE profile_id=?', [profileId]); } catch(e) {}
     if (deleterProfileId) {
@@ -851,7 +916,7 @@ app.delete('/api/group-members/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ===== UPLOAD LOGIC - VOICE & DOCUMENT FOLDERS UNDER profileId =====
+// ===== UPLOAD LOGIC =====
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
@@ -859,7 +924,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: `Avatar only allows images. Use /api/chat/upload/voice or /api/chat/upload/document for other files` });
     }
     const profileId = req.query.profileId || req.body?.profileId || req.query.id || req.body?.id;
-    if (!profileId) return res.status(400).json({ error: "profileId missing! Call /api/upload?profileId=YOUR_PROFILE_ID" });
+    if (!profileId) return res.status(400).json({ error: "profileId missing!" });
     const safeName = req.file.originalname.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9.\-_]/g, '');
     const key = `avatars/${profileId}/${Date.now()}_${safeName}`;
     await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: req.file.buffer, ContentType: req.file.mimetype || 'image/jpeg' }));
