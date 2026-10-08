@@ -57,7 +57,6 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
 
-  // FIXED: Show all valid profiles - for Nirmal 6 members
   const onlyFml = (arr) => (arr||[]).filter(p => p && p.id);
   const getDisplayName = (p) => {
     if(!p) return 'Unknown';
@@ -66,29 +65,7 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     return p.display_name || p.id;
   };
 
-  const computeFallbackRelations = (all, self) => {
-    if (!self) return onlyFml(all);
-    return all.map(p => {
-      const pid = String(p.id);
-      const sid = String(self.id);
-      if (pid === sid) return {...p, computed_relation: 'Self' };
-      if (String(p.id) === String(self.father_id)) return {...p, computed_relation: 'Father' };
-      if (String(p.id) === String(self.mother_id)) return {...p, computed_relation: 'Mother' };
-      if (self.spouse_id && String(self.spouse_id) === pid) return {...p, computed_relation: 'Spouse' };
-      if (p.spouse_id && String(p.spouse_id) === sid) return {...p, computed_relation: 'Spouse' };
-      const isSpouseViaChild = all.some(c =>
-        (String(c.father_id) === sid && String(c.mother_id) === pid) ||
-        (String(c.mother_id) === sid && String(c.father_id) === pid)
-      );
-      if (isSpouseViaChild) return {...p, computed_relation: 'Spouse' };
-      if (self.father_id && String(p.father_id) === String(self.father_id) && pid!== sid) return {...p, computed_relation: 'Sibling' };
-      if (self.mother_id && String(p.mother_id) === String(self.mother_id) && pid!== sid) return {...p, computed_relation: 'Sibling' };
-      if (String(p.father_id) === sid || String(p.mother_id) === sid) return {...p, computed_relation: 'Child' };
-      return {...p, computed_relation: 'Family'};
-    });
-  };
-
-  // FINAL FIXED loadTree - FOR NIRMAL FRIEND (pr_ owner) - SHOWS 6 MEMBERS
+  // --- FIXED loadTree with BFS MERGE ---
   const loadTree = async (profileId, shouldUpdateDisplay = false) => {
     let realProfileId = profileId;
     try {
@@ -104,123 +81,30 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
       const selfProf = await fetch(`/api/profiles/${realProfileId}`).then(r=>r.json()).catch(()=>null);
       if(!selfProf?.id) throw new Error('no self');
       const ownerToLoad = selfProf.owner_user_id || realProfileId;
-      console.log('[loadTree] self:', realProfileId, 'ownerToLoad:', ownerToLoad, 'name:', selfProf.display_name);
 
-      let merged = [];
-      const addUnique = (list) => {
-        list.forEach(p=>{
-          if(p?.id &&!merged.find(m=>String(m.id)===String(p.id))) merged.push(p);
-        });
-      };
+      // NEW: Server already does BFS merge (Nirmal+Arun). Just call owner API.
+      const res = await fetch(`/api/profiles?owner_user_id=${encodeURIComponent(ownerToLoad)}`);
+      const data = await res.json().catch(()=>[]);
+      const list = Array.isArray(data)? data : (data.profiles||[]);
 
-      const fetchList = async (url) => {
-        try{
-          const r = await fetch(url);
-          if(!r.ok) return [];
-          const data = await r.json().catch(()=>[]);
-          if(Array.isArray(data)) return data.map(v=>v.profile||v).filter(Boolean);
-          if(data?.profiles && Array.isArray(data.profiles)) return data.profiles;
-          return data?.id? [data] : [];
-        }catch{ return []; }
-      };
-
-      addUnique([selfProf]);
-
-      // FIXED: Fetch ALL then filter by ownerToLoad
-      let allProfilesRaw = await fetchList(`/api/profiles`);
-      console.log('[loadTree] allProfilesRaw count (all):', allProfilesRaw.length);
-      if(allProfilesRaw.length===0){
-        console.log('[loadTree] retry owner filter:', ownerToLoad);
-        allProfilesRaw = await fetchList(`/api/profiles?owner_user_id=${encodeURIComponent(ownerToLoad)}`);
-        console.log('[loadTree] allProfilesRaw count (filtered):', allProfilesRaw.length);
+      // Fallback to family-tree if owner API empty
+      let finalList = list;
+      if(finalList.length===0){
+        const ft = await fetch(`/api/family-tree/${realProfileId}`).then(r=>r.json()).catch(()=>[]);
+        finalList = Array.isArray(ft)? ft : [];
       }
 
-      if(allProfilesRaw.length>0){
-        const byOwner = allProfilesRaw.filter(p=> String(p.owner_user_id)===String(ownerToLoad));
-        console.log('[loadTree] byOwner count for', ownerToLoad, ':', byOwner.length, byOwner.map(x=>x.display_name));
-        if(byOwner.length>0){
-          addUnique(byOwner);
-        } else {
-          addUnique(allProfilesRaw);
-        }
+      // Ensure self is present
+      if(!finalList.find(p=>String(p.id)===String(realProfileId)) && selfProf){
+        finalList.unshift({...selfProf, computed_relation:'Self', relation_label:'Self'});
       }
 
-      for(const fid of [selfProf.father_id, selfProf.mother_id]){
-        if(fid){
-          try{
-            const f = await fetch(`/api/profiles/${fid}`).then(r=>r.json()).catch(()=>null);
-            if(f?.id) addUnique([f]);
-            else {
-              const fromAll = allProfilesRaw.find(p=> String(p.id)===String(fid));
-              if(fromAll) addUnique([fromAll]);
-            }
-          }catch{}
-        }
-      }
-
-      const childrenByFather = await fetchList(`/api/profiles?father_id=${realProfileId}`);
-      const childrenByMother = await fetchList(`/api/profiles?mother_id=${realProfileId}`);
-      addUnique([...childrenByFather,...childrenByMother]);
-      const localChildren = allProfilesRaw.filter(p=> String(p.father_id)===String(realProfileId) || String(p.mother_id)===String(realProfileId));
-      addUnique(localChildren);
-
-      if(selfProf.father_id){
-        const sibs = await fetchList(`/api/profiles?father_id=${selfProf.father_id}`);
-        addUnique(sibs.filter(p=>String(p.id)!==String(realProfileId)));
-        const localSibsF = allProfilesRaw.filter(p=> String(p.father_id)===String(selfProf.father_id) && String(p.id)!==String(realProfileId));
-        addUnique(localSibsF);
-      }
-      if(selfProf.mother_id){
-        const sibsM = await fetchList(`/api/profiles?mother_id=${selfProf.mother_id}`);
-        addUnique(sibsM.filter(p=>String(p.id)!==String(realProfileId)));
-        const localSibsM = allProfilesRaw.filter(p=> String(p.mother_id)===String(selfProf.mother_id) && String(p.id)!==String(realProfileId));
-        addUnique(localSibsM);
-      }
-
-      const owned = await fetchList(`/api/profiles?owner_user_id=${encodeURIComponent(ownerToLoad)}`);
-      addUnique(owned);
-
-      const familyTree = await fetchList(`/api/family-tree/${realProfileId}`);
-      addUnique(familyTree);
-
-      const currentChildren = merged.filter(p=> String(p.father_id)===String(realProfileId) || String(p.mother_id)===String(realProfileId));
-      const spouseIds = new Set();
-      currentChildren.forEach(c=>{
-        if(String(c.father_id)===String(realProfileId) && c.mother_id) spouseIds.add(String(c.mother_id));
-        if(String(c.mother_id)===String(realProfileId) && c.father_id) spouseIds.add(String(c.father_id));
-      });
-      for(const sid of spouseIds){
-        if(!merged.find(m=>String(m.id)===sid)){
-          try{
-            const s = await fetch(`/api/profiles/${sid}`).then(r=>r.json()).catch(()=>null);
-            if(s?.id) addUnique([s]);
-            else {
-              const fromAll = allProfilesRaw.find(p=> String(p.id)===String(sid));
-              if(fromAll) addUnique([fromAll]);
-            }
-          }catch{}
-        }
-      }
-
-      if(!merged.find(p=>String(p.id)===String(realProfileId))) addUnique([selfProf]);
-
-      if (String(ownerToLoad)!== 'ur001') {
-        merged = merged.filter(p=> String(p.id)!=='ur001');
-      } else {
-        if(!merged.find(p=>String(p.id)==='ur001')){
-          try{
-            const ur = await fetch(`/api/profiles/ur001`).then(r=>r.json()).catch(()=>null);
-            if(ur?.id) addUnique([ur]);
-          }catch{}
-        }
-      }
-
-      const uniq = Array.from(new Map(merged.map(p=>[String(p.id),p])).values());
-      console.log('[loadTree] FINAL merged:', uniq.length, uniq.map(p=>p.display_name));
-      const finalList = computeFallbackRelations(uniq, selfProf);
-      setTreeProfiles(finalList);
-      setTreeSelf(selfProf);
-      if (shouldUpdateDisplay) setDisplayProfile(selfProf);
+      // Clean duplicates
+      const uniq = Array.from(new Map(finalList.map(p=>[String(p.id),p])).values());
+      setTreeProfiles(uniq);
+      const selfInList = uniq.find(p=>String(p.id)===String(realProfileId)) || selfProf;
+      setTreeSelf(selfInList);
+      if (shouldUpdateDisplay) setDisplayProfile(selfInList);
       return;
     } catch(e){
       console.log('loadTree failed', e);
@@ -312,12 +196,12 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
     try{ await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(msg) }); }catch{}
   };
 
-  const father = treeProfiles.find(p=>p.computed_relation==='Father');
-  const mother = treeProfiles.find(p=>p.computed_relation==='Mother');
-  const spouse = treeProfiles.find(p=>p.computed_relation==='Spouse');
-  const siblings = treeProfiles.filter(p=>p.computed_relation==='Sibling');
-  const children = treeProfiles.filter(p=>p.computed_relation==='Child');
-  const extraFamily = treeProfiles.filter(p=>p.computed_relation==='Family');
+  const father = treeProfiles.find(p=>p.computed_relation==='Father' || p.relation_label==='Father');
+  const mother = treeProfiles.find(p=>p.computed_relation==='Mother' || p.relation_label==='Mother');
+  const spouse = treeProfiles.find(p=>p.computed_relation==='Spouse' || p.relation_label==='Spouse');
+  const siblings = treeProfiles.filter(p=>p.computed_relation==='Sibling' || p.relation_label==='Sibling');
+  const children = treeProfiles.filter(p=>p.computed_relation==='Child' || p.relation_label==='Child');
+  const extraFamily = treeProfiles.filter(p=> (p.computed_relation==='Family' || p.relation_label==='Family' || p.computed_relation==='Extended Family' || p.relation_label==='Extended Family'));
 
   const handleNodeClick = (p, isCenter) => {
     if(!p) return;
@@ -613,16 +497,15 @@ export default function Deck({ onGoProfile, onGoMemberAdd, onGoGroups, onLogout 
                   })()
                 ) : (
                   <div style={{width:'1200px',minWidth:'1200px',minHeight:'540px',padding:'20px'}}>
-                    <p className="text-[10px] text-gray-500 mb-3">Level {treeDepth} - Unlimited tree ({allProfiles.length} members)</p>
+                    <p className="text-[10px] text-gray-500 mb-3">Level {treeDepth} - Merged Family ({allProfiles.length} members - Nirmal+Arun merged)</p>
                     <div className="flex flex-wrap gap-5">
                       {allProfiles.map(p=><Node key={p.id} p={p} />)}
                     </div>
                   </div>
                 )}
-                {/* NEW: Show extra Family members for Nirmal case */}
                 {treeDepth===0 && extraFamily.length>0 && (
                   <div className="absolute bottom-2 left-2 right-2 bg-[#fffefb] border-t border-[#e9e2d6] pt-2">
-                    <p className="text-[10px] font-bold text-gray-500 mb-1">Extended Family ({extraFamily.length})</p>
+                    <p className="text-[10px] font-bold text-gray-500 mb-1">Extended Family ({extraFamily.length}) - Merged via marriage</p>
                     <div className="flex gap-3 flex-wrap">
                       {extraFamily.map(p=><Node key={p.id} p={p} />)}
                     </div>

@@ -102,7 +102,12 @@ if (!dbUrl) {
           INDEX idx_receiver (receiver_id, status)
         )`);
         await pool.query(`ALTER TABLE profiles ADD COLUMN category VARCHAR(10) DEFAULT 'Fml'`).catch(()=>{});
-        console.log("✅ Groups + Chatbox + Video Calls tables ready");
+        // Indexes for merge speed
+        await pool.query(`CREATE INDEX idx_rel_owner ON profile_relations(owner_profile_id)`).catch(()=>{});
+        await pool.query(`CREATE INDEX idx_rel_related ON profile_relations(related_profile_id)`).catch(()=>{});
+        await pool.query(`CREATE INDEX idx_profiles_father ON profiles(father_id)`).catch(()=>{});
+        await pool.query(`CREATE INDEX idx_profiles_mother ON profiles(mother_id)`).catch(()=>{});
+        console.log("✅ Tables + Indexes ready");
       } catch(e){ console.log("table init:", e.message); }
     }).catch(err => console.error("❌ DB Failed:", err.message));
   } catch (err) { console.error("Pool error:", err.message); }
@@ -120,6 +125,75 @@ const s3 = new S3Client({
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// ================== FAMILY MERGE BFS HELPER - THIS FIXES NIRMAL+ARUN MERGE ==================
+function getConnectedFamily(startId, allProfiles, allRelations) {
+  if (!startId) return [];
+  const profileMap = new Map(allProfiles.map(p => [p.id, p]));
+  const childrenByParent = new Map();
+  for (const p of allProfiles) {
+    if (p.father_id) {
+      if (!childrenByParent.has(p.father_id)) childrenByParent.set(p.father_id, []);
+      childrenByParent.get(p.father_id).push(p.id);
+    }
+    if (p.mother_id) {
+      if (!childrenByParent.has(p.mother_id)) childrenByParent.set(p.mother_id, []);
+      childrenByParent.get(p.mother_id).push(p.id);
+    }
+  }
+  const relAdj = new Map();
+  for (const r of allRelations) {
+    if (!relAdj.has(r.owner_profile_id)) relAdj.set(r.owner_profile_id, []);
+    relAdj.get(r.owner_profile_id).push(r.related_profile_id);
+    if (!relAdj.has(r.related_profile_id)) relAdj.set(r.related_profile_id, []);
+    relAdj.get(r.related_profile_id).push(r.owner_profile_id);
+  }
+
+  const visited = new Set([startId]);
+  const queue = [startId];
+
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    const currProf = profileMap.get(curr);
+
+    // Parents
+    if (currProf?.father_id &&!visited.has(currProf.father_id)) { visited.add(currProf.father_id); queue.push(currProf.father_id); }
+    if (currProf?.mother_id &&!visited.has(currProf.mother_id)) { visited.add(currProf.mother_id); queue.push(currProf.mother_id); }
+
+    // Children
+    const childs = childrenByParent.get(curr) || [];
+    for (const chId of childs) { if (!visited.has(chId)) { visited.add(chId); queue.push(chId); } }
+
+    // Spouse / Sibling via relations table
+    const rels = relAdj.get(curr) || [];
+    for (const relId of rels) { if (!visited.has(relId)) { visited.add(relId); queue.push(relId); } }
+  }
+
+  return allProfiles.filter(p => visited.has(p.id));
+}
+
+function computeRelationLabel(self, target, allRelations) {
+  if (target.id === self.id) return 'Self';
+  if (target.id === self.father_id) return 'Father';
+  if (target.id === self.mother_id) return 'Mother';
+  if (target.father_id === self.id || target.mother_id === self.id) return 'Child';
+  const isSpouse = allRelations.some(r =>
+    (r.owner_profile_id === self.id && r.related_profile_id === target.id && r.relation_type === 'Spouse') ||
+    (r.related_profile_id === self.id && r.owner_profile_id === target.id && r.relation_type === 'Spouse')
+  );
+  if (isSpouse) return 'Spouse';
+  const isSibling = allRelations.some(r =>
+    (r.owner_profile_id === self.id && r.related_profile_id === target.id && r.relation_type === 'Sibling')
+  ) || (self.father_id && self.father_id === target.father_id) || (self.mother_id && self.mother_id === target.mother_id);
+  if (isSibling && target.id!== self.id) {
+    if (target.father_id === self.father_id && self.father_id) return 'Sibling';
+    if (target.mother_id === self.mother_id && self.mother_id) return 'Sibling';
+    const sibRel = allRelations.some(r => r.relation_type === 'Sibling' && ((r.owner_profile_id === self.id && r.related_profile_id === target.id) || (r.owner_profile_id === target.id && r.related_profile_id === self.id)));
+    if (sibRel) return 'Sibling';
+  }
+  if (target.father_id === self.father_id && target.mother_id === self.mother_id && self.father_id) return 'Sibling';
+  return 'Extended Family';
+}
 
 app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Clandeck Backend Running!' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', db: pool? 'pool exists' : 'no pool', bucket: BUCKET_NAME }));
@@ -399,7 +473,7 @@ app.put('/api/users/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- FIXED #1 & #2: THIS IS THE ONLY CHANGE ---
+// --- FIXED #1 & #2: FAMILY MERGE LOGIC ---
 app.get('/api/profiles', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
   try {
@@ -432,68 +506,47 @@ app.get('/api/profiles', async (req, res) => {
       const [all] = await pool.query('SELECT * FROM profiles LIMIT 500');
       return res.json(all);
     }
-    const [owned] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
-    let self = owned.find(p => p.id === owner_user_id);
-    if (!self) {
+    // --- MAIN LOGIC FOR DECK ---
+    const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =? LIMIT 1000', [owner_user_id]);
+    let self = allProfiles.find(p => p.id === owner_user_id);
+    if (!self && allProfiles.length > 0) {
+      // fallback: find claimed self
       const [sRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [owner_user_id]);
       self = sRows[0];
     }
-    if (!self) return res.json(owned);
-    if (self.category === 'Fnd') {
-      const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id =?', [owner_user_id]);
-      const father = allProfiles.find(p => p.id === self.father_id) || null;
-      const mother = allProfiles.find(p => p.id === self.mother_id) || null;
-      const children = allProfiles.filter(p => p.father_id === self.id || p.mother_id === self.id);
-      const siblings = allProfiles.filter(p => {
-        if (p.id === self.id) return false;
-        if (!self.father_id &&!self.mother_id) return false;
-        if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
-        if (self.father_id) return p.father_id === self.father_id;
-        if (self.mother_id) return p.mother_id === self.mother_id;
-        return false;
-      });
-      const result = [];
-      result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
-      if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
-      if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
-      siblings.forEach(s => { if(!result.find(r=>r.id===s.id)) result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}); });
-      children.forEach(c => { if(!result.find(r=>r.id===c.id)) result.push({...c, relation_label: 'Child', computed_relation: 'Child'}); });
-      allProfiles.forEach(p => { if(!result.find(r=>r.id===p.id)) result.push({...p, relation_label: 'Family', computed_relation: 'Family'}); });
-      return res.json(result);
+    if (!self) return res.json(allProfiles);
+
+    // Fetch all relations for these profiles
+    const profileIds = allProfiles.map(p => p.id);
+    let allRelations = [];
+    if (profileIds.length > 0) {
+      const placeholders = profileIds.map(() => '?').join(',');
+      const [rels] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id IN (${placeholders}) OR related_profile_id IN (${placeholders})`, [...profileIds,...profileIds]);
+      allRelations = rels;
     }
-    const [allProfiles] = await pool.query('SELECT * FROM profiles');
-    const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)`, [self.id, self.id]);
-    const spouseIds = spouseRelations.map(r => r.owner_profile_id === self.id? r.related_profile_id : r.owner_profile_id);
-    const familyParentIds = [self.id,...spouseIds];
-    const father = allProfiles.find(p => p.id === self.father_id);
-    const mother = allProfiles.find(p => p.id === self.mother_id);
-    const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
-    const children = allProfiles.filter(p => {
-      if (p.id === self.id) return false;
-      if (spouseIds.includes(p.id)) return false;
-      return familyParentIds.includes(p.father_id) || familyParentIds.includes(p.mother_id);
-    });
-    const siblings = allProfiles.filter(p => {
-      if (p.id === self.id) return false;
-      if (spouseIds.includes(p.id)) return false;
-      if (children.find(c=>c.id===p.id)) return false;
-      if (!self.father_id &&!self.mother_id) return false;
-      if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
-      if (self.father_id) return p.father_id === self.father_id;
-      if (self.mother_id) return p.mother_id === self.mother_id;
-      return false;
-    });
-    const result = [];
-    result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
-    if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
-    if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
-    spouses.forEach(s => result.push({...s, relation_label: 'Spouse', computed_relation: 'Spouse'}));
-    siblings.forEach(s => result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}));
-    children.forEach(c => result.push({...c, relation_label: 'Child', computed_relation: 'Child'}));
-    const ownedFnd = owned.filter(p=>p.category==='Fnd' &&!result.find(r=>r.id===p.id));
-    ownedFnd.forEach(f=> result.push({...f, relation_label:'Friend', computed_relation:'Friend'}));
+
+    // If self is Friend category, return only immediate small circle
+    if (self.category === 'Fnd') {
+      const connected = getConnectedFamily(self.id, allProfiles, allRelations);
+      return res.json(connected.map(p => ({...p, relation_label: computeRelationLabel(self, p, allRelations), computed_relation: computeRelationLabel(self, p, allRelations)})));
+    }
+
+    // NORMAL FAMILY: Full BFS merge - This merges Nirmal + Arun when sister marries Arun
+    const connectedFamily = getConnectedFamily(self.id, allProfiles, allRelations);
+
+    // Add Friends who are owned but not connected? Keep them separate? For now include only connected + friends as separate cards
+    const result = connectedFamily.map(p => ({
+     ...p,
+      relation_label: computeRelationLabel(self, p, allRelations),
+      computed_relation: computeRelationLabel(self, p, allRelations)
+    }));
+
+    // Add Friend profiles (category Fnd) that are owned but not part of family BFS - they show as Friend cards
+    const friends = allProfiles.filter(p => p.category === 'Fnd' &&!connectedFamily.find(c => c.id === p.id));
+    friends.forEach(f => result.push({...f, relation_label: 'Friend', computed_relation: 'Friend'}));
+
     res.json(result);
-  } catch(e){ res.status(500).json({error: e.message}) }
+  } catch(e){ console.error(e); res.status(500).json({error: e.message}) }
 });
 app.get('/api/profiles/:id', async (req, res) => {
   if (!pool) return res.status(500).json({ error: "DB not connected" });
@@ -509,61 +562,24 @@ app.get('/api/family-tree/:profileId', async (req, res) => {
     const [selfRows] = await pool.query('SELECT * FROM profiles WHERE id=?', [profileId]);
     const self = selfRows[0];
     if (!self) return res.json([]);
-    if (self.category === 'Fnd') {
-      const ownerId = self.owner_user_id || profileId;
-      const [owned] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=?', [ownerId]);
-      if (owned.length > 0) {
-        const father = owned.find(p => p.id === self.father_id);
-        const mother = owned.find(p => p.id === self.mother_id);
-        const siblings = owned.filter(p => {
-          if (p.id === self.id) return false;
-          if (!self.father_id &&!self.mother_id) return false;
-          if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
-          if (self.father_id) return p.father_id === self.father_id;
-          if (self.mother_id) return p.mother_id === self.mother_id;
-          return false;
-        });
-        const children = owned.filter(p => p.father_id === self.id || p.mother_id === self.id);
-        const result = [];
-        result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
-        if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
-        if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
-        siblings.forEach(s => { if(!result.find(r=>r.id===s.id)) result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}); });
-        children.forEach(c => { if(!result.find(r=>r.id===c.id)) result.push({...c, relation_label: 'Child', computed_relation: 'Child'}); });
-        owned.forEach(p => { if(!result.find(r=>r.id===p.id)) result.push({...p, relation_label: 'Family', computed_relation: 'Family'}); });
-        return res.json(result);
-      }
-      return res.json([{...self, relation_label: 'Self', computed_relation: 'Self'}]);
+
+    // Get all profiles of same owner to allow merge
+    const ownerId = self.owner_user_id;
+    const [allProfiles] = await pool.query('SELECT * FROM profiles WHERE owner_user_id=? LIMIT 1000', [ownerId]);
+    const profileIds = allProfiles.map(p=>p.id);
+    let allRelations = [];
+    if (profileIds.length) {
+      const placeholders = profileIds.map(()=> '?').join(',');
+      const [rels] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id IN (${placeholders}) OR related_profile_id IN (${placeholders})`, [...profileIds,...profileIds]);
+      allRelations = rels;
     }
-    const [allProfiles] = await pool.query('SELECT * FROM profiles');
-    const [spouseRelations] = await pool.query(`SELECT * FROM profile_relations WHERE relation_type='Spouse' AND (owner_profile_id=? OR related_profile_id=?)`, [profileId, profileId]);
-    const spouseIds = spouseRelations.map(r => r.owner_profile_id === profileId? r.related_profile_id : r.owner_profile_id);
-    const familyParentIds = [profileId,...spouseIds];
-    const father = allProfiles.find(p => p.id === self.father_id);
-    const mother = allProfiles.find(p => p.id === self.mother_id);
-    const spouses = allProfiles.filter(p => spouseIds.includes(p.id));
-    const children = allProfiles.filter(p => {
-      if (p.id === profileId) return false;
-      if (spouseIds.includes(p.id)) return false;
-      return familyParentIds.includes(p.father_id) || familyParentIds.includes(p.mother_id);
-    });
-    const siblings = allProfiles.filter(p => {
-      if (p.id === profileId) return false;
-      if (spouseIds.includes(p.id)) return false;
-      if (children.find(c=>c.id===p.id)) return false;
-      if (!self.father_id &&!self.mother_id) return false;
-      if (self.father_id && self.mother_id) return p.father_id === self.father_id && p.mother_id === self.mother_id;
-      if (self.father_id) return p.father_id === self.father_id;
-      if (self.mother_id) return p.mother_id === self.mother_id;
-      return false;
-    });
-    const result = [];
-    result.push({...self, relation_label: 'Self', computed_relation: 'Self'});
-    if (father) result.push({...father, relation_label: 'Father', computed_relation: 'Father'});
-    if (mother) result.push({...mother, relation_label: 'Mother', computed_relation: 'Mother'});
-    spouses.forEach(s => result.push({...s, relation_label: 'Spouse', computed_relation: 'Spouse'}));
-    siblings.forEach(s => result.push({...s, relation_label: 'Sibling', computed_relation: 'Sibling'}));
-    children.forEach(c => result.push({...c, relation_label: 'Child', computed_relation: 'Child'}));
+
+    const connected = getConnectedFamily(profileId, allProfiles, allRelations);
+    const result = connected.map(p => ({
+     ...p,
+      relation_label: computeRelationLabel(self, p, allRelations),
+      computed_relation: computeRelationLabel(self, p, allRelations)
+    }));
     res.json(result);
   } catch (e) {
     console.error('family-tree error', e.message);
@@ -992,4 +1008,4 @@ if (fs.existsSync(frontendPath)) {
   app.get('/', (req, res) => res.json({ status: 'ok', message: 'Backend Running - dist not found' }));
 }
 
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Running on ${PORT} - Family Merge Fixed`));
