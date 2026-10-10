@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 import logo from './assets/clandeck-logo.png';
 import Profile from './Profile.jsx';
@@ -18,13 +18,24 @@ export default function App() {
   const [userId, setUserId] = useState("");
   const [page, setPage] = useState("login");
 
-  // claim flow states
   const [showClaim, setShowClaim] = useState(false);
   const [claimStep, setClaimStep] = useState(1);
   const [newUname, setNewUname] = useState("");
   const [newPass, setNewPass] = useState("");
   const [claimLoading, setClaimLoading] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
+
+  // Auto login if already logged in
+  useEffect(()=>{
+    const savedId = localStorage.getItem('userId');
+    const savedName = localStorage.getItem('userName');
+    const token = localStorage.getItem('token');
+    if(savedId && token){
+      setUserId(savedId);
+      setUserName(savedName||savedId);
+      setPage("deck");
+    }
+  },[]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -40,18 +51,12 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uname: username.trim(), password })
       });
-
       const text = await res.text();
       let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(text || `Server error ${res.status}. Check Railway logs.`);
-      }
+      try { data = JSON.parse(text); } 
+      catch { throw new Error(text || `Server error ${res.status}. Check Railway logs.`); }
+      if (!res.ok) throw new Error(data.error || "Login failed");
 
-      if (!res.ok) throw new Error(data.error || data.message || "Login failed");
-
-      // check id vs shared_profile_id
       if (data.shared_profile_id && data.id !== data.shared_profile_id) {
         setPendingUser(data);
         setNewUname(data.uname || username.trim());
@@ -61,36 +66,28 @@ export default function App() {
         return;
       }
 
-      const name = data.name || data.user?.name || data.fullName || username;
-      const id = data.id || data.userId || data.uname || data.email || data.user?._id;
+      const name = data.name || username;
+      const id = data.id || data.uname;
 
       setUserName(name);
       setUserId(id);
       localStorage.setItem('userName', name);
       localStorage.setItem('userId', id);
-      localStorage.setItem('token', data.token);
-
+      localStorage.setItem('token', data.token || "token-"+id);
       setShowPopup(true);
-
     } catch (err) {
       console.error("Login Error:", err);
       if (err.message === "Failed to fetch") {
-        setError("Cannot reach server. Backend is down or MONGO_URI missing in Railway. Check /api");
+        setError("Cannot reach server. Backend is sleeping, wait 30s and try. Check /api/health");
       } else {
         setError(err.message);
       }
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleClaimSave = async () => {
-    if (!newUname.trim() ||!newPass.trim()) {
-      setError("Please fill username and password");
-      return;
-    }
-    setClaimLoading(true);
-    setError("");
+    if (!newUname.trim() ||!newPass.trim()) { setError("Fill username and password"); return; }
+    setClaimLoading(true); setError("");
     try {
       const res = await fetch(`/api/claim-account`, {
         method: 'POST',
@@ -98,83 +95,29 @@ export default function App() {
         body: JSON.stringify({ userId: pendingUser.id, newUname: newUname.trim(), newPassword: newPass.trim() })
       });
       const text = await res.text();
-      let data;
-      try { data = JSON.parse(text); } catch { throw new Error(text); }
+      let data; try { data = JSON.parse(text); } catch { throw new Error(text); }
       if (!res.ok) throw new Error(data.error || "Claim failed");
-
       setUserName(pendingUser.name || newUname);
       setUserId(data.id);
       localStorage.setItem('userName', pendingUser.name || newUname);
       localStorage.setItem('userId', data.id);
       localStorage.setItem('token', "token-" + data.id);
-
-      setShowClaim(false);
-      setShowPopup(true);
-
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setClaimLoading(false);
-    }
+      setShowClaim(false); setShowPopup(true);
+    } catch (err) { setError(err.message); } 
+    finally { setClaimLoading(false); }
   };
 
-  const handlePopupOk = () => {
-    setShowPopup(false);
-    setPage("deck");
-  };
-
+  const handlePopupOk = () => { setShowPopup(false); setPage("deck"); };
   const handleLogout = () => {
-    localStorage.removeItem('userId');
-    localStorage.removeItem('userName');
-    localStorage.removeItem('token');
-    setPage("login");
-    setUsername("");
-    setPassword("");
+    localStorage.clear();
+    setPage("login"); setUsername(""); setPassword("");
   };
 
-  if (page === "deck") {
-    return <Deck 
-      onGoProfile={() => setPage("profile")} 
-      onGoMemberAdd={() => setPage("memberadd")}
-      onGoGroups={() => setPage("groups")}
-      onLogout={handleLogout} 
-    />;
-  }
-
-  if (page === "profile") {
-    return <Profile 
-      userName={userName} 
-      onLogout={handleLogout} 
-      onEdit={() => setPage("editprofile")} 
-      onBack={() => setPage("deck")} 
-      onDeck={() => setPage("deck")}
-      onGoMemberAdd={() => setPage("memberadd")}
-      onGoGroups={() => setPage("groups")}
-    />;
-  }
-
-  if (page === "memberadd") {
-    return <Memberadd 
-      onGoProfile={() => setPage("profile")} 
-      onGoDeck={() => setPage("deck")}
-      onGoGroups={() => setPage("groups")}
-      onLogout={handleLogout} 
-    />;
-  }
-
-  if (page === "groups") {
-    return <Memberadd 
-      onGoProfile={() => setPage("profile")} 
-      onGoDeck={() => setPage("deck")}
-      onGoGroups={() => setPage("groups")}
-      onLogout={handleLogout}
-      initialTab="groups"
-    />;
-  }
-
-  if (page === "editprofile") {
-    return <EditProfile onBack={() => setPage("profile")} />;
-  }
+  if (page === "deck") return <Deck onGoProfile={()=>setPage("profile")} onGoMemberAdd={()=>setPage("memberadd")} onGoGroups={()=>setPage("groups")} onLogout={handleLogout} />;
+  if (page === "profile") return <Profile userName={userName} onLogout={handleLogout} onEdit={()=>setPage("editprofile")} onBack={()=>setPage("deck")} onDeck={()=>setPage("deck")} onGoMemberAdd={()=>setPage("memberadd")} onGoGroups={()=>setPage("groups")} />;
+  if (page === "memberadd") return <Memberadd onGoProfile={()=>setPage("profile")} onGoDeck={()=>setPage("deck")} onGoGroups={()=>setPage("groups")} onLogout={handleLogout} />;
+  if (page === "groups") return <Memberadd onGoProfile={()=>setPage("profile")} onGoDeck={()=>setPage("deck")} onGoGroups={()=>setPage("groups")} onLogout={handleLogout} initialTab="groups" />;
+  if (page === "editprofile") return <EditProfile onBack={()=>setPage("profile")} />;
 
   return (
     <div className="login-wrapper">
@@ -184,76 +127,24 @@ export default function App() {
           <p className="brand-subtitle">Manage your entire family in one beautiful deck.</p>
         </div>
       </div>
-
       <div className="form-section">
         <div className="form-container">
           <h2 className="form-title">Your Clan, In One Deck</h2>
           <p className="form-desc">Welcome back — sign in to continue</p>
           <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label>Username</label>
-              <input type="text" placeholder="e.g. UNTeju" value={username} onChange={(e) => setUsername(e.target.value)} required />
-            </div>
-            <div className="form-group">
-              <label>Password</label>
-              <div className="password-wrapper">
-                <input type={showPass? "text" : "password"} placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                <span className="toggle-eye" onClick={() => setShowPass(!showPass)}>{showPass? "🙈" : "👁️"}</span>
-              </div>
-            </div>
+            <div className="form-group"><label>Username</label><input type="text" placeholder="e.g. UNTeju" value={username} onChange={(e)=>setUsername(e.target.value)} required /></div>
+            <div className="form-group"><label>Password</label><div className="password-wrapper"><input type={showPass?"text":"password"} placeholder="••••••••" value={password} onChange={(e)=>setPassword(e.target.value)} required /><span className="toggle-eye" onClick={()=>setShowPass(!showPass)}>{showPass?"🙈":"👁️"}</span></div></div>
             {error && <p className="error-msg">{error}</p>}
-            <button type="submit" className="login-btn" disabled={loading}>
-              {loading? "Logging in..." : "Log in"}
-            </button>
+            <button type="submit" className="login-btn" disabled={loading}>{loading?"Logging in...":"Log in"}</button>
           </form>
         </div>
       </div>
-
-      {showPopup && (
-        <div className="popup-overlay">
-          <div className="popup-box">
-            <h3>Login Successful! ✅</h3>
-            <p>successfully logged in:</p>
-            <h2 className="popup-id">{userName}</h2>
-            <button className="login-btn" onClick={handlePopupOk}>OK</button>
-          </div>
-        </div>
-      )}
-
+      {showPopup && (<div className="popup-overlay"><div className="popup-box"><h3>Login Successful! ✅</h3><p>successfully logged in:</p><h2 className="popup-id">{userName}</h2><button className="login-btn" onClick={handlePopupOk}>OK</button></div></div>)}
       {showClaim && (
-        <div className="popup-overlay" style={{zIndex: 9999}}>
-          <div className="popup-box" style={{maxWidth: '380px'}}>
-            {claimStep===1? (
-              <>
-                <h3>Claim your account? 🔐</h3>
-                <p style={{margin:'12px 0', fontSize:'13px'}}>This profile was shared with you. Do you want to claim it as your own?</p>
-                {error && <p className="error-msg">{error}</p>}
-                <div style={{display:'flex', gap:'10px', marginTop:'16px'}}>
-                  <button className="login-btn" style={{flex:1, background:'#eee', color:'#000'}} onClick={()=>{setShowClaim(false); setPendingUser(null);}}>Later</button>
-                  <button className="login-btn" style={{flex:1}} onClick={()=>{setClaimStep(2); setError("");}}>Yes</button>
-                </div>
-              </>
-            ):(
-              <>
-                <h3>Change username & password 🔑</h3>
-                <p style={{fontSize:'12px', color:'#666', marginBottom:'12px'}}>Set your new login credentials</p>
-                <div className="form-group">
-                  <label>New Username</label>
-                  <input type="text" placeholder="Choose new username" value={newUname} onChange={e=>setNewUname(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>New Password</label>
-                  <input type="text" placeholder="Choose new password" value={newPass} onChange={e=>setNewPass(e.target.value)} />
-                </div>
-                {error && <p className="error-msg">{error}</p>}
-                <div style={{display:'flex', gap:'10px', marginTop:'16px'}}>
-                  <button className="login-btn" style={{flex:1, background:'#eee', color:'#000'}} onClick={()=>setClaimStep(1)}>Back</button>
-                  <button className="login-btn" style={{flex:1}} onClick={handleClaimSave} disabled={claimLoading}>{claimLoading? "Saving..." : "Save"}</button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <div className="popup-overlay" style={{zIndex:9999}}><div className="popup-box" style={{maxWidth:'380px'}}>
+          {claimStep===1? (<><h3>Claim your account? 🔐</h3><p style={{margin:'12px 0', fontSize:'13px'}}>This profile was shared with you. Do you want to claim it?</p>{error&&<p className="error-msg">{error}</p>}<div style={{display:'flex', gap:'10px', marginTop:'16px'}}><button className="login-btn" style={{flex:1, background:'#eee', color:'#000'}} onClick={()=>{setShowClaim(false); setPendingUser(null);}}>Later</button><button className="login-btn" style={{flex:1}} onClick={()=>{setClaimStep(2); setError("");}}>Yes</button></div></>
+          ):(<><h3>Change username & password 🔑</h3><div className="form-group"><label>New Username</label><input type="text" value={newUname} onChange={e=>setNewUname(e.target.value)} /></div><div className="form-group"><label>New Password</label><input type="text" value={newPass} onChange={e=>setNewPass(e.target.value)} /></div>{error&&<p className="error-msg">{error}</p>}<div style={{display:'flex', gap:'10px'}}><button className="login-btn" style={{flex:1, background:'#eee', color:'#000'}} onClick={()=>setClaimStep(1)}>Back</button><button className="login-btn" style={{flex:1}} onClick={handleClaimSave} disabled={claimLoading}>{claimLoading?"Saving...":"Save"}</button></div></>)}
+        </div></div>
       )}
     </div>
   );
