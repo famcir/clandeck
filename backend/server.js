@@ -1,3 +1,4 @@
+require('dotenv').config(); // <-- THIS WAS MISSING FOR LOCAL!
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -19,13 +20,20 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// MySQL Pool - Railway auto provides these variables
+console.log('DB Config:', {
+  host: process.env.MYSQLHOST,
+  port: process.env.MYSQLPORT,
+  user: process.env.MYSQLUSER,
+  db: process.env.MYSQLDATABASE
+});
+
+// MySQL Pool - Fixed to use PUBLIC host locally
 const pool = mysql.createPool({
-  host: process.env.MYSQLHOST || process.env.MYSQL_HOST || 'mysql.railway.internal',
-  user: process.env.MYSQLUSER || process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQLPASSWORD || process.env.MYSQL_ROOT_PASSWORD || process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQLDATABASE || process.env.MYSQL_DATABASE || 'railway',
-  port: process.env.MYSQLPORT || 3306,
+  host: process.env.MYSQLHOST || 'altaria.proxy.rlwy.net',
+  user: process.env.MYSQLUSER || 'root',
+  password: process.env.MYSQLPASSWORD || 'ddkkKLwrUPaXHqxNjhwsRMzzbsMwOTqAb',
+  database: process.env.MYSQLDATABASE || 'railway',
+  port: process.env.MYSQLPORT || 36114,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -53,8 +61,6 @@ const handleLogin = async (req, res) => {
   password = String(password).trim();
 
   try {
-    // Allow login with id OR uname (UNS, 001 etc) - case insensitive for uname
-    // Also handle '001' = 1 for INT id columns
     const [rows] = await pool.query(
       `SELECT id, name, mobile, email, photo_url, status, uname, password 
        FROM users 
@@ -69,7 +75,6 @@ const handleLogin = async (req, res) => {
 
     const user = rows[0];
     
-    // Return BOTH formats so old and new Login.jsx both work!
     const userData = {
       id: user.id,
       name: user.name,
@@ -85,8 +90,8 @@ const handleLogin = async (req, res) => {
       success: true,
       msg: `Welcome, ${user.name}!`,
       message: `Welcome, ${user.name}!`,
-      user: userData,  // <-- For new Login.jsx
-      id: userData.id, // <-- For backward compatibility
+      user: userData,
+      id: userData.id,
       name: userData.name,
       uname: userData.uname,
       photo_url: userData.photo_url
@@ -98,11 +103,9 @@ const handleLogin = async (req, res) => {
   }
 };
 
-// Both endpoints work!
 app.post('/api/login', handleLogin);
 app.post('/api/auth/login', handleLogin);
 
-// Test endpoint to see if users table exists
 app.get('/api/test-users', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT id, uname, name, status FROM users LIMIT 5');

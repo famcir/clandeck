@@ -1,8 +1,11 @@
 {
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^18.0.9",
     "express": "^4.18.2",
     "mysql2": "^3.9.0"
   },
-  "scripts": { "start": "node server.js" }
+  "scripts": {
+    "start": "node server.js"
+  }
 }
