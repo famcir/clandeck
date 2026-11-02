@@ -5,7 +5,6 @@ const mysql = require('mysql2/promise');
 
 const app = express();
 
-// FIXED CORS - allow x-admin-key header
 app.use(cors({
   origin: [
     'http://localhost:5173', 
@@ -19,14 +18,7 @@ app.use(cors({
   credentials: true,
   allowedHeaders: ['Content-Type', 'x-admin-key', 'Authorization']
 }));
-app.use(express.json());
-
-console.log('DB Config:', {
-  host: process.env.MYSQLHOST,
-  port: process.env.MYSQLPORT,
-  user: process.env.MYSQLUSER,
-  db: process.env.MYSQLDATABASE
-});
+app.use(express.json({ limit: '10mb' }));
 
 const pool = mysql.createPool({
   host: process.env.MYSQLHOST || 'altaria.proxy.rlwy.net',
@@ -42,7 +34,7 @@ const pool = mysql.createPool({
 app.get('/', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT NOW() as time, DATABASE() as db');
-    res.json({ status: 'Clandeck API Running', db: 'connected', time: rows[0].time, database: rows[0].db });
+    res.json({ status: 'Clandeck API Running - Family Logic v2', db: 'connected', time: rows[0].time, database: rows[0].db });
   } catch (e) {
     res.json({ status: 'API Running', db: 'disconnected', error: e.message });
   }
@@ -50,204 +42,259 @@ app.get('/', async (req, res) => {
 
 const handleLogin = async (req, res) => {
   let { username, password } = req.body;
-  console.log('Login attempt:', username);
-  
-  if (!username || !password) {
-    return res.status(400).json({ success: false, msg: 'Username and password required', message: 'Username and password required' });
-  }
-
-  username = String(username).trim();
-  password = String(password).trim();
-
+  if (!username || !password) return res.status(400).json({ success: false, msg: 'Username and password required' });
+  username = String(username).trim(); password = String(password).trim();
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, mobile, email, photo_url, status, uname, password 
-       FROM users 
+      `SELECT id, name, mobile, email, photo_url, status, uname, password, gender FROM users 
        WHERE (id = ? OR uname = ? OR LOWER(uname) = LOWER(?) OR CAST(id AS CHAR) = ?) 
        AND password = ? AND status = 'active' LIMIT 1`,
       [username, username, username, username, password]
     );
+    if (rows.length === 0) return res.status(401).json({ success: false, msg: 'Invalid username or password' });
+    const user = rows[0];
+    // AUTO-CREATE PROFILE IF NOT EXISTS (important for your flow)
+    try {
+      const [pExist] = await pool.query(`SELECT id FROM profiles WHERE owner_user_id = ? LIMIT 1`, [user.id]);
+      if(pExist.length===0){
+        await pool.query(`INSERT INTO profiles (owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 1, NOW())`, [user.id, user.name, user.name, user.gender||'Male']);
+      }
+    } catch(e){ console.log('auto-create profile on login failed', e.message); }
+    
+    const userData = { id: user.id, name: user.name, uname: user.uname, username: user.uname || user.id, mobile: user.mobile, email: user.email, photo_url: user.photo_url, status: user.status };
+    res.json({ success: true, msg: `Welcome, ${user.name}!`, user: userData, id: userData.id, name: userData.name, uname: userData.uname, photo_url: userData.photo_url });
+  } catch (err) { res.status(500).json({ success: false, msg: 'Database error', error: err.message }); }
+};
 
-    if (rows.length === 0) {
-      return res.status(401).json({ success: false, msg: 'Invalid username or password', message: 'Invalid username or password' });
+// ========== FAMILY LOGIC v2 - FIXED ==========
+
+app.get('/api/profiles/family-tree', async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
+
+    let myProfile = null;
+    const [myRows] = await pool.query(`SELECT * FROM profiles WHERE owner_user_id = ? LIMIT 1`, [user_id]);
+    if (myRows.length === 0) {
+      const [byId] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [user_id]);
+      if (byId.length === 0) return res.status(404).json({ success: false, error: 'Profile not found for user - call /auto-create' });
+      myProfile = byId[0];
+    } else {
+      myProfile = myRows[0];
     }
 
-    const user = rows[0];
-    
-    const userData = {
-      id: user.id,
-      name: user.name,
-      uname: user.uname,
-      username: user.uname || user.id,
-      mobile: user.mobile,
-      email: user.email,
-      photo_url: user.photo_url,
-      status: user.status
-    };
+    const myProfileId = myProfile.id;
+    const [relations] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id = ? ORDER BY spouse_group ASC, birth_order ASC`, [myProfileId]);
 
-    res.json({
-      success: true,
-      msg: `Welcome, ${user.name}!`,
-      message: `Welcome, ${user.name}!`,
-      user: userData,
-      id: userData.id,
-      name: userData.name,
-      uname: userData.uname,
-      photo_url: userData.photo_url
-    });
+    let father = null, mother = null, siblings = [], spouses = [], children = [];
+    for (let rel of relations) {
+      const [pRows] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [rel.related_profile_id]);
+      if (pRows.length === 0) continue;
+      const profile = pRows[0];
+      profile._relation = rel; // keep meta
+      if (rel.relation_type === 'Father') father = profile;
+      else if (rel.relation_type === 'Mother') mother = profile;
+      else if (rel.relation_type === 'Sibling') siblings.push(profile);
+      else if (rel.relation_type === 'Spouse') {
+        profile.spouse_group = rel.spouse_group;
+        profile.spouse_number = rel.spouse_number;
+        spouses.push(profile);
+      } else if (rel.relation_type === 'Child') {
+        children.push(profile);
+      }
+    }
 
-  } catch (err) {
-    console.error('DB Error:', err);
-    res.status(500).json({ success: false, msg: 'Database error', message: 'Database error', error: err.message });
+    for (let child of children) {
+      const c = child; // already from profiles
+      child.spouse_parent_id = (c.father_id === myProfileId) ? c.mother_id : c.father_id;
+    }
+
+    spouses.sort((a,b) => (a.spouse_number||0) - (b.spouse_number||0));
+    children.sort((a,b) => (a.birth_order||0) - (b.birth_order||0));
+    siblings.sort((a,b) => (a.birth_order||0) - (b.birth_order||0));
+
+    res.json({ success: true, myProfile, family: { father, mother, siblings, spouses, children } });
+  } catch (e) {
+    console.error('family-tree error', e);
+    res.status(500).json({ success: false, error: e.message });
   }
-};
+});
 
-// ========== ADMIN DB ROUTES - FINAL FIXED ==========
+// AUTO-CREATE MY PROFILE (called from ProfileEdit if null)
+app.post('/api/profiles/auto-create', async (req, res) => {
+  try {
+    const { user_id, display_name, gender } = req.body;
+    if(!user_id) return res.status(400).json({ success:false, error:'user_id required' });
+    const [exists] = await pool.query(`SELECT * FROM profiles WHERE owner_user_id = ? LIMIT 1`, [user_id]);
+    if(exists.length>0) return res.json({ success:true, data: exists[0], message:'already exists' });
+    
+    let name = display_name;
+    if(!name){
+      const [u] = await pool.query(`SELECT name FROM users WHERE id = ? LIMIT 1`, [user_id]);
+      name = u[0]?.name || 'User';
+    }
+    const [result] = await pool.query(`INSERT INTO profiles (owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 1, NOW())`, [user_id, name, name, gender||'Male']);
+    const [rows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [result.insertId]);
+    res.json({ success:true, data: rows[0] });
+  } catch(e){ res.status(500).json({ success:false, error:e.message }); }
+});
+
+app.post('/api/profiles/family-add', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let { user_id, owner_profile_id, display_name, gender, relation_type, father_id, mother_id, spouse_id, birth_order } = req.body;
+    if (!owner_profile_id || !display_name || !relation_type) return res.status(400).json({ success: false, error: 'owner_profile_id, display_name, relation_type required' });
+
+    // Fallback: if owner_profile_id is actually user_id
+    let [ownerRows] = await conn.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [owner_profile_id]);
+    if (ownerRows.length === 0) {
+      const [byUser] = await conn.query(`SELECT * FROM profiles WHERE owner_user_id = ? LIMIT 1`, [owner_profile_id]);
+      if(byUser.length===0) throw new Error('Owner profile not found');
+      ownerRows = byUser;
+      owner_profile_id = byUser[0].id;
+    }
+    const owner = ownerRows[0];
+
+    let newProfileId; let spouse_group = null; let spouse_number = null;
+
+    if (relation_type === 'Father' || relation_type === 'Mother') {
+      const [result] = await conn.query(
+        `INSERT INTO profiles (owner_user_id, display_name, name, gender, father_id, mother_id, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, NULL, NULL, 1, 0, NOW())`,
+        [owner.owner_user_id, display_name, display_name, gender || (relation_type==='Father'?'Male':'Female')]
+      );
+      newProfileId = result.insertId;
+      if (relation_type === 'Father') await conn.query(`UPDATE profiles SET father_id = ? WHERE id = ?`, [newProfileId, owner_profile_id]);
+      else await conn.query(`UPDATE profiles SET mother_id = ? WHERE id = ?`, [newProfileId, owner_profile_id]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [owner_profile_id, newProfileId, relation_type]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [newProfileId, owner_profile_id, 'Child']);
+
+    } else if (relation_type === 'Sibling') {
+      if (!father_id && !mother_id) throw new Error('Select at least one parent for sibling');
+      const [result] = await conn.query(
+        `INSERT INTO profiles (owner_user_id, display_name, name, gender, father_id, mother_id, show_in_deck, is_claimed, birth_order, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`,
+        [owner.owner_user_id, display_name, display_name, gender, father_id||null, mother_id||null, birth_order||1]
+      );
+      newProfileId = result.insertId;
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, birth_order, created_at) VALUES (?, ?, 'Sibling', ?, NOW())`, [owner_profile_id, newProfileId, birth_order||1]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, birth_order, created_at) VALUES (?, ?, 'Sibling', ?, NOW())`, [newProfileId, owner_profile_id, owner.birth_order||1]);
+      if (father_id) {
+        await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, 'Child', NOW())`, [father_id, newProfileId]);
+        await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, 'Father', NOW())`, [newProfileId, father_id]);
+      }
+      if (mother_id) {
+        await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, 'Child', NOW())`, [mother_id, newProfileId]);
+        await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, 'Mother', NOW())`, [newProfileId, mother_id]);
+      }
+
+    } else if (relation_type === 'Spouse') {
+      const [maxGroup] = await conn.query(`SELECT MAX(spouse_group) as maxg FROM profile_relations WHERE owner_profile_id = ? AND relation_type='Spouse'`, [owner_profile_id]);
+      spouse_group = (maxGroup[0].maxg || 0) + 1; spouse_number = spouse_group;
+      const [result] = await conn.query(`INSERT INTO profiles (owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 0, NOW())`, [owner.owner_user_id, display_name, display_name, gender]);
+      newProfileId = result.insertId;
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, created_at) VALUES (?, ?, 'Spouse', ?, ?, NOW())`, [owner_profile_id, newProfileId, spouse_group, spouse_number]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, created_at) VALUES (?, ?, 'Spouse', ?, ?, NOW())`, [newProfileId, owner_profile_id, spouse_group, spouse_number]);
+
+    } else if (relation_type === 'Child') {
+      if (!spouse_id) throw new Error('Spouse selection required for child');
+      const [spouseRows] = await conn.query(`SELECT * FROM profiles WHERE id = ?`, [spouse_id]);
+      if (spouseRows.length === 0) throw new Error('Spouse not found');
+      const spouse = spouseRows[0];
+      let childFatherId, childMotherId;
+      if ((owner.gender||'').toLowerCase() === 'male') { childFatherId = owner_profile_id; childMotherId = spouse_id; }
+      else { childFatherId = spouse_id; childMotherId = owner_profile_id; }
+      const [spGroupRow] = await conn.query(`SELECT spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type='Spouse' LIMIT 1`, [owner_profile_id, spouse_id]);
+      spouse_group = spGroupRow[0]?.spouse_group || 1;
+      const [result] = await conn.query(`INSERT INTO profiles (owner_user_id, display_name, name, gender, father_id, mother_id, show_in_deck, is_claimed, birth_order, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`, [owner.owner_user_id, display_name, display_name, gender, childFatherId, childMotherId, birth_order||1]);
+      newProfileId = result.insertId;
+      const ownerRel = (owner.gender||'').toLowerCase()==='male' ? 'Father' : 'Mother';
+      const spouseRel = (spouse.gender||'').toLowerCase()==='male' ? 'Father' : 'Mother';
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, birth_order, created_at) VALUES (?, ?, 'Child', ?, ?, NOW())`, [owner_profile_id, newProfileId, spouse_group, birth_order||1]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [newProfileId, owner_profile_id, ownerRel]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, birth_order, created_at) VALUES (?, ?, 'Child', ?, ?, NOW())`, [spouse_id, newProfileId, spouse_group, birth_order||1]);
+      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [newProfileId, spouse_id, spouseRel]);
+    }
+
+    await conn.commit();
+    const [newProfileRows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [newProfileId]);
+    res.json({ success: true, data: newProfileRows[0], message: `${relation_type} added` });
+  } catch (e) {
+    await conn.rollback(); console.error('family-add error', e); res.status(500).json({ success: false, error: e.message });
+  } finally { conn.release(); }
+});
+
+// DELETE FAMILY MEMBER (with relations cleanup)
+app.delete('/api/profiles/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    await pool.query(`DELETE FROM profile_relations WHERE owner_profile_id = ? OR related_profile_id = ?`, [id, id]);
+    await pool.query(`DELETE FROM profiles WHERE id = ?`, [id]);
+    res.json({ success:true });
+  } catch(e){ res.status(500).json({ success:false, error:e.message }); }
+});
+
+// BACKWARD COMPAT
+app.get('/api/family', async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const [rows] = await pool.query(`SELECT * FROM profiles WHERE owner_user_id = ?`, [user_id]);
+    res.json({ success: true, data: rows });
+  } catch (e) { res.json({ success: true, data: [] }); }
+});
+
+// ========== ADMIN ROUTES ==========
 const ADMIN_KEY = process.env.ADMIN_KEY || "clandeck_2026_admin";
-
 const adminAuth = (req, res, next) => {
   const key = req.headers["x-admin-key"] || req.query.key;
-  if (!key) {
-    console.log('Admin access without key - allowing for Admin user');
-    return next();
-  }
-  if (key !== ADMIN_KEY) {
-    return res.status(401).json({ success: false, message: "Unauthorized - Wrong Admin Key" });
-  }
+  if (!key) return next();
+  if (key !== ADMIN_KEY) return res.status(401).json({ success: false, message: "Unauthorized" });
   next();
 };
-
-// FIXED - Returns object format: { "users": {totalCount, columns, columnsDetail, rows} } - matches AdminDB.jsx
 app.get('/api/admin/all-tables', adminAuth, async (req, res) => {
   try {
     const [tablesRaw] = await pool.query('SHOW TABLES');
     const tableNames = tablesRaw.map(t => Object.values(t)[0]);
-    
     const result = {};
     for (const tName of tableNames) {
       try {
         const [countRes] = await pool.query(`SELECT COUNT(*) as count FROM \`${tName}\``);
         const [colsDetail] = await pool.query(`SHOW COLUMNS FROM \`${tName}\``);
         const [rows] = await pool.query(`SELECT * FROM \`${tName}\` ORDER BY id DESC LIMIT 50`);
-        result[tName] = {
-          totalCount: countRes[0].count,
-          columns: colsDetail.map(c => c.Field),
-          columnsDetail: colsDetail,
-          rows: rows
-        };
-      } catch (e) {
-        console.log(`Error loading ${tName}:`, e.message);
-        result[tName] = {
-          totalCount: 0,
-          columns: [],
-          columnsDetail: [],
-          rows: []
-        };
-      }
+        result[tName] = { totalCount: countRes[0].count, columns: colsDetail.map(c => c.Field), columnsDetail: colsDetail, rows: rows };
+      } catch (e) { result[tName] = { totalCount: 0, columns: [], columnsDetail: [], rows: [] }; }
     }
     res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: err.message });
-  }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-
 app.get('/api/admin/stats', adminAuth, async (req, res) => {
   try {
     const [usersCount] = await pool.query('SELECT COUNT(*) as count FROM users');
     const [latestUsers] = await pool.query('SELECT id, uname, name, email, mobile, status, created_at FROM users ORDER BY id DESC LIMIT 20');
     const [tables] = await pool.query('SHOW TABLES');
-    
-    let clansCount = 0;
-    try {
-      const [c] = await pool.query('SELECT COUNT(*) as count FROM clans');
-      clansCount = c[0].count;
-    } catch(e) { clansCount = 0; }
-
-    res.json({
-      success: true,
-      counts: { users: usersCount[0].count, clans: clansCount },
-      latestUsers,
-      tables: tables.map(t => Object.values(t)[0]),
-      db: process.env.MYSQLDATABASE || 'railway'
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+    let clansCount = 0; try { const [c] = await pool.query('SELECT COUNT(*) as count FROM clans'); clansCount = c[0].count; } catch(e) {}
+    res.json({ success: true, counts: { users: usersCount[0].count, clans: clansCount }, latestUsers, tables: tables.map(t => Object.values(t)[0]), db: process.env.MYSQLDATABASE || 'railway' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-
 app.get('/api/admin/table/:tableName', adminAuth, async (req, res) => {
   try {
     const table = req.params.tableName;
-    if (!/^[a-zA-Z0-9_]+$/.test(table)) {
-      return res.status(400).json({ success: false, message: "Invalid table name" });
-    }
+    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
     const [rows] = await pool.query(`SELECT * FROM \`${table}\` ORDER BY id DESC LIMIT 100`);
     const [columns] = await pool.query(`SHOW COLUMNS FROM \`${table}\``);
     res.json({ success: true, table, columns, rows, count: rows.length });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-
 app.post('/api/admin/table/:tableName', adminAuth, async (req, res) => {
-  try {
-    const table = req.params.tableName;
-    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
-    const data = req.body;
-    delete data.id;
-    const keys = Object.keys(data);
-    const values = Object.values(data);
-    if (keys.length === 0) return res.status(400).json({ success: false, message: "No data" });
-    const placeholders = keys.map(() => '?').join(',');
-    const [result] = await pool.query(`INSERT INTO \`${table}\` (\`${keys.join('`,`')}\`) VALUES (${placeholders})`, values);
-    res.json({ success: true, insertId: result.insertId });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  try { const table = req.params.tableName; const data = req.body; delete data.id; const keys = Object.keys(data); const values = Object.values(data); const placeholders = keys.map(() => '?').join(','); const [result] = await pool.query(`INSERT INTO \`${table}\` (\`${keys.join('`,`')}\`) VALUES (${placeholders})`, values); res.json({ success: true, insertId: result.insertId }); } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-
 app.put('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
-  try {
-    const table = req.params.tableName;
-    const id = req.params.id;
-    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
-    const data = req.body;
-    delete data.id;
-    const keys = Object.keys(data);
-    const values = Object.values(data);
-    const setClause = keys.map(k => `\`${k}\` = ?`).join(', ');
-    await pool.query(`UPDATE \`${table}\` SET ${setClause} WHERE id = ?`, [...values, id]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  try { const table = req.params.tableName; const id = req.params.id; const data = req.body; delete data.id; const keys = Object.keys(data); const values = Object.values(data); const setClause = keys.map(k => `\`${k}\` = ?`).join(', '); await pool.query(`UPDATE \`${table}\` SET ${setClause} WHERE id = ?`, [...values, id]); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-
 app.delete('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
-  try {
-    const table = req.params.tableName;
-    const id = req.params.id;
-    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
-    await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [id]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  try { const table = req.params.tableName; const id = req.params.id; await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [id]); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
-// ========== END ADMIN ROUTES ==========
-
-app.post('/api/login', handleLogin);
-app.post('/api/auth/login', handleLogin);
-
-app.get('/api/test-users', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT id, uname, name, status FROM users LIMIT 5');
-    res.json({ success: true, count: rows.length, users: rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
+app.post('/api/login', handleLogin); app.post('/api/auth/login', handleLogin);
+app.get('/api/test-users', async (req, res) => { try { const [rows] = await pool.query('SELECT id, uname, name, status FROM users LIMIT 5'); res.json({ success: true, count: rows.length, users: rows }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/profile/:id', async (req, res) => { try { const [rows] = await pool.query('SELECT * FROM profiles WHERE id = ? OR owner_user_id = ? LIMIT 1', [req.params.id, req.params.id]); if(rows.length===0) return res.json({ success:false }); res.json({ success:true, data: rows[0] }); } catch(e){ res.status(500).json({ success:false }); } });
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Clandeck API Running on ${PORT} - MySQL Pool Ready - Admin Key: ${ADMIN_KEY}`));
+app.listen(PORT, () => console.log(`Clandeck API v2 Running on ${PORT} - Family Logic Fixed`));
