@@ -102,12 +102,11 @@ const handleLogin = async (req, res) => {
   }
 };
 
-// ========== ADMIN DB ROUTES - FIXED ==========
+// ========== ADMIN DB ROUTES - FINAL FIXED ==========
 const ADMIN_KEY = process.env.ADMIN_KEY || "clandeck_2026_admin";
 
 const adminAuth = (req, res, next) => {
   const key = req.headers["x-admin-key"] || req.query.key;
-  // Allow both key OR if no key, still allow for Admin user logged in (frontend check)
   if (!key) {
     console.log('Admin access without key - allowing for Admin user');
     return next();
@@ -118,24 +117,37 @@ const adminAuth = (req, res, next) => {
   next();
 };
 
-// NEW ROUTE - This was missing! Fixes your 404
+// FIXED - Returns object format: { "users": {totalCount, columns, columnsDetail, rows} } - matches AdminDB.jsx
 app.get('/api/admin/all-tables', adminAuth, async (req, res) => {
   try {
     const [tablesRaw] = await pool.query('SHOW TABLES');
     const tableNames = tablesRaw.map(t => Object.values(t)[0]);
     
-    const tablesWithInfo = await Promise.all(tableNames.map(async (tName) => {
+    const result = {};
+    for (const tName of tableNames) {
       try {
         const [countRes] = await pool.query(`SELECT COUNT(*) as count FROM \`${tName}\``);
-        const [cols] = await pool.query(`SHOW COLUMNS FROM \`${tName}\``);
-        return { name: tName, count: countRes[0].count, columns: cols.map(c => c.Field) };
+        const [colsDetail] = await pool.query(`SHOW COLUMNS FROM \`${tName}\``);
+        const [rows] = await pool.query(`SELECT * FROM \`${tName}\` ORDER BY id DESC LIMIT 50`);
+        result[tName] = {
+          totalCount: countRes[0].count,
+          columns: colsDetail.map(c => c.Field),
+          columnsDetail: colsDetail,
+          rows: rows
+        };
       } catch (e) {
-        return { name: tName, count: 0, columns: [] };
+        console.log(`Error loading ${tName}:`, e.message);
+        result[tName] = {
+          totalCount: 0,
+          columns: [],
+          columnsDetail: [],
+          rows: []
+        };
       }
-    }));
-
-    res.json({ success: true, tables: tablesWithInfo });
+    }
+    res.json(result);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -178,7 +190,6 @@ app.get('/api/admin/table/:tableName', adminAuth, async (req, res) => {
   }
 });
 
-// NEW - INSERT
 app.post('/api/admin/table/:tableName', adminAuth, async (req, res) => {
   try {
     const table = req.params.tableName;
@@ -196,7 +207,6 @@ app.post('/api/admin/table/:tableName', adminAuth, async (req, res) => {
   }
 });
 
-// NEW - UPDATE
 app.put('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
   try {
     const table = req.params.tableName;
@@ -214,7 +224,6 @@ app.put('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
   }
 });
 
-// NEW - DELETE
 app.delete('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
   try {
     const table = req.params.tableName;
