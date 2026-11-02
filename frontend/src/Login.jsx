@@ -7,7 +7,7 @@ const API_BASE =
   import.meta.env.VITE_API_BASE || 
   'https://clandeck-production.up.railway.app';
 
-export default function Login({ onLoginSuccess, onGoAdmin, onGoConstruction }) {
+export default function Login({ onLoginSuccess, onGoConstruction }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -82,7 +82,6 @@ export default function Login({ onLoginSuccess, onGoAdmin, onGoConstruction }) {
             <button type="submit" className="login-btn black-btn" disabled={loginLoading}>
               {loginLoading ? "Loading Deck..." : "Log in"}
             </button>
-            <button type="button" className="login-btn blue-btn" onClick={onGoAdmin}>Open Admin DB View</button>
           </form>
           <p className="back-link" onClick={onGoConstruction}>← Back to Construction</p>
         </div>
