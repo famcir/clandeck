@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import clandeckLogo from '../assets/clandeck_h.png';
+import clandeckLogo from './assets/clandeck_h.png';
 
 export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSearch, page }) {
   const [open, setOpen] = useState(false);

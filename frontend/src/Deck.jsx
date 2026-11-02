@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import CommonHeader from './CommonHeader.jsx';
 import ChatSystem from './ChatSystem.jsx';
-import mangoBasket from '../assets/mango-basket.png';
+import mangoBasket from './assets/mango-basket.png';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 

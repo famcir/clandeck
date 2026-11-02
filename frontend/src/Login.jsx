@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import logo from '../assets/clandeck-logo.png';
+import logo from './assets/clandeck-logo.png';
 import './Login.css';
 
 const API_BASE = 

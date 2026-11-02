@@ -103,6 +103,61 @@ const handleLogin = async (req, res) => {
   }
 };
 
+// ========== ADMIN DB ROUTES - NEW ==========
+const ADMIN_KEY = process.env.ADMIN_KEY || "clandeck_2026_admin";
+
+const adminAuth = (req, res, next) => {
+  const key = req.headers["x-admin-key"] || req.query.key;
+  if (key !== ADMIN_KEY) {
+    return res.status(401).json({ success: false, message: "Unauthorized - Wrong Admin Key" });
+  }
+  next();
+};
+
+// Admin stats - see database details
+app.get('/api/admin/stats', adminAuth, async (req, res) => {
+  try {
+    const [usersCount] = await pool.query('SELECT COUNT(*) as count FROM users');
+    const [latestUsers] = await pool.query('SELECT id, uname, name, email, mobile, status, created_at FROM users ORDER BY id DESC LIMIT 20');
+    const [tables] = await pool.query('SHOW TABLES');
+    
+    let clansCount = 0;
+    try {
+      const [c] = await pool.query('SELECT COUNT(*) as count FROM clans');
+      clansCount = c[0].count;
+    } catch(e) { clansCount = 0; }
+
+    res.json({
+      success: true,
+      counts: {
+        users: usersCount[0].count,
+        clans: clansCount,
+      },
+      latestUsers,
+      tables: tables.map(t => Object.values(t)[0]),
+      db: process.env.MYSQLDATABASE || 'railway'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin - get any table data
+app.get('/api/admin/table/:tableName', adminAuth, async (req, res) => {
+  try {
+    const table = req.params.tableName;
+    if (!/^[a-zA-Z0-9_]+$/.test(table)) {
+      return res.status(400).json({ success: false, message: "Invalid table name" });
+    }
+    const [rows] = await pool.query(`SELECT * FROM \`${table}\` LIMIT 100`);
+    const [columns] = await pool.query(`SHOW COLUMNS FROM \`${table}\``);
+    res.json({ success: true, table, columns, rows, count: rows.length });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// ========== END ADMIN ROUTES ==========
+
 app.post('/api/login', handleLogin);
 app.post('/api/auth/login', handleLogin);
 
@@ -116,4 +171,4 @@ app.get('/api/test-users', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Clandeck API Running on ${PORT} - MySQL Pool Ready`));
+app.listen(PORT, () => console.log(`Clandeck API Running on ${PORT} - MySQL Pool Ready - Admin Key: ${ADMIN_KEY}`));
