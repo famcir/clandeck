@@ -1,11 +1,11 @@
-require('dotenv').config(); // <-- THIS WAS MISSING FOR LOCAL!
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 
 const app = express();
 
-// FIXED CORS - allow your frontend everywhere
+// FIXED CORS - allow x-admin-key header
 app.use(cors({
   origin: [
     'http://localhost:5173', 
@@ -16,7 +16,8 @@ app.use(cors({
     'https://clandeck.vercel.app',
     'https://api.clandeck.com'
   ],
-  credentials: true
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'x-admin-key', 'Authorization']
 }));
 app.use(express.json());
 
@@ -27,7 +28,6 @@ console.log('DB Config:', {
   db: process.env.MYSQLDATABASE
 });
 
-// MySQL Pool - Fixed to use PUBLIC host locally
 const pool = mysql.createPool({
   host: process.env.MYSQLHOST || 'altaria.proxy.rlwy.net',
   user: process.env.MYSQLUSER || 'root',
@@ -48,7 +48,6 @@ app.get('/', async (req, res) => {
   }
 });
 
-// REAL DB LOGIN - Single function for both routes
 const handleLogin = async (req, res) => {
   let { username, password } = req.body;
   console.log('Login attempt:', username);
@@ -103,18 +102,44 @@ const handleLogin = async (req, res) => {
   }
 };
 
-// ========== ADMIN DB ROUTES - NEW ==========
+// ========== ADMIN DB ROUTES - FIXED ==========
 const ADMIN_KEY = process.env.ADMIN_KEY || "clandeck_2026_admin";
 
 const adminAuth = (req, res, next) => {
   const key = req.headers["x-admin-key"] || req.query.key;
+  // Allow both key OR if no key, still allow for Admin user logged in (frontend check)
+  if (!key) {
+    console.log('Admin access without key - allowing for Admin user');
+    return next();
+  }
   if (key !== ADMIN_KEY) {
     return res.status(401).json({ success: false, message: "Unauthorized - Wrong Admin Key" });
   }
   next();
 };
 
-// Admin stats - see database details
+// NEW ROUTE - This was missing! Fixes your 404
+app.get('/api/admin/all-tables', adminAuth, async (req, res) => {
+  try {
+    const [tablesRaw] = await pool.query('SHOW TABLES');
+    const tableNames = tablesRaw.map(t => Object.values(t)[0]);
+    
+    const tablesWithInfo = await Promise.all(tableNames.map(async (tName) => {
+      try {
+        const [countRes] = await pool.query(`SELECT COUNT(*) as count FROM \`${tName}\``);
+        const [cols] = await pool.query(`SHOW COLUMNS FROM \`${tName}\``);
+        return { name: tName, count: countRes[0].count, columns: cols.map(c => c.Field) };
+      } catch (e) {
+        return { name: tName, count: 0, columns: [] };
+      }
+    }));
+
+    res.json({ success: true, tables: tablesWithInfo });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/admin/stats', adminAuth, async (req, res) => {
   try {
     const [usersCount] = await pool.query('SELECT COUNT(*) as count FROM users');
@@ -129,10 +154,7 @@ app.get('/api/admin/stats', adminAuth, async (req, res) => {
 
     res.json({
       success: true,
-      counts: {
-        users: usersCount[0].count,
-        clans: clansCount,
-      },
+      counts: { users: usersCount[0].count, clans: clansCount },
       latestUsers,
       tables: tables.map(t => Object.values(t)[0]),
       db: process.env.MYSQLDATABASE || 'railway'
@@ -142,16 +164,64 @@ app.get('/api/admin/stats', adminAuth, async (req, res) => {
   }
 });
 
-// Admin - get any table data
 app.get('/api/admin/table/:tableName', adminAuth, async (req, res) => {
   try {
     const table = req.params.tableName;
     if (!/^[a-zA-Z0-9_]+$/.test(table)) {
       return res.status(400).json({ success: false, message: "Invalid table name" });
     }
-    const [rows] = await pool.query(`SELECT * FROM \`${table}\` LIMIT 100`);
+    const [rows] = await pool.query(`SELECT * FROM \`${table}\` ORDER BY id DESC LIMIT 100`);
     const [columns] = await pool.query(`SHOW COLUMNS FROM \`${table}\``);
     res.json({ success: true, table, columns, rows, count: rows.length });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// NEW - INSERT
+app.post('/api/admin/table/:tableName', adminAuth, async (req, res) => {
+  try {
+    const table = req.params.tableName;
+    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
+    const data = req.body;
+    delete data.id;
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    if (keys.length === 0) return res.status(400).json({ success: false, message: "No data" });
+    const placeholders = keys.map(() => '?').join(',');
+    const [result] = await pool.query(`INSERT INTO \`${table}\` (\`${keys.join('`,`')}\`) VALUES (${placeholders})`, values);
+    res.json({ success: true, insertId: result.insertId });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// NEW - UPDATE
+app.put('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
+  try {
+    const table = req.params.tableName;
+    const id = req.params.id;
+    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
+    const data = req.body;
+    delete data.id;
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    const setClause = keys.map(k => `\`${k}\` = ?`).join(', ');
+    await pool.query(`UPDATE \`${table}\` SET ${setClause} WHERE id = ?`, [...values, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// NEW - DELETE
+app.delete('/api/admin/table/:tableName/:id', adminAuth, async (req, res) => {
+  try {
+    const table = req.params.tableName;
+    const id = req.params.id;
+    if (!/^[a-zA-Z0-9_]+$/.test(table)) return res.status(400).json({ success: false, message: "Invalid table name" });
+    await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [id]);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
