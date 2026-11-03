@@ -8,16 +8,52 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
   const user = self || JSON.parse(localStorage.getItem('user') || '{}');
   const initial = (user?.name || user?.display_name || 'S')[0]?.toUpperCase();
 
+  // FIXED NAVIGATION - always works even if props missing
+  const goToDeck = () => {
+    setOpen(false);
+    if (onDeck) return onDeck();
+    window.location.hash = '#/deck';
+  };
+
+  const goToProfileEdit = () => {
+    setOpen(false);
+    if (onProfile) return onProfile();
+    window.location.hash = '#/profile-edit';
+  };
+
+  const handleLogout = () => {
+    setOpen(false);
+    if (onLogout) return onLogout();
+    // Fallback logout
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    window.location.hash = '#/login';
+    window.location.reload();
+  };
+
   const navBtn = (label, active, action) => (
-    <button onClick={() => { action && action(); setOpen(false); }} style={{
-      padding:'7px 18px', borderRadius:'8px', border:'1px solid #d8c5a3', cursor:'pointer',
-      fontWeight: active ? 800 : 700, fontSize:'12px',
-      background: active ? '#1a1a1a' : '#c9ad83',
-      color: active ? 'white' : 'white',
-      transition:'all 0.2s',
-      boxShadow: active ? '0 2px 6px rgba(0,0,0,0.15)' : 'none'
-    }}>{label}</button>
+    <button 
+      onClick={action}
+      style={{
+        padding:'7px 18px', 
+        borderRadius:'8px', 
+        border:'1px solid #d8c5a3', 
+        cursor:'pointer',
+        fontWeight: 800, 
+        fontSize:'12px',
+        background: active ? '#1a1a1a' : '#c9ad83',
+        color: 'white',
+        transition:'all 0.2s',
+        boxShadow: active ? '0 2px 6px rgba(0,0,0,0.15)' : 'none',
+      }}
+    >
+      {label}
+    </button>
   );
+
+  // Normalize page names
+  const isDeck = page==='deck' || page==='your-deck';
+  const isProfile = page==='profile' || page==='profile-edit' || page==='edit';
 
   return (
     <header style={{width:'100%', background:'white', borderBottom:'1px solid #e9e2d6', position:'sticky', top:0, zIndex:100}}>
@@ -31,15 +67,8 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
         .search-icon-btn { display:none; width:36px; height:36px; border-radius:50%; border:1px solid #e9e2d6; background:#faf7f2; cursor:pointer; align-items:center; justify-content:center; font-size:16px; }
         .logo-img { height: 28px; width: auto; object-fit: contain; cursor: pointer; }
         .hamburger { display:none; font-size:20px; background:none; border:none; cursor:pointer; }
-        
-        @media(max-width: 1100px){
-          .center-area { max-width: 320px; }
-        }
-        @media(max-width: 900px){
-          .center-area { max-width: 200px; }
-          .search-input::placeholder { font-size:11px; }
-        }
-
+        @media(max-width: 1100px){ .center-area { max-width: 320px; } }
+        @media(max-width: 900px){ .center-area { max-width: 200px; } .search-input::placeholder { font-size:11px; } }
         @media(max-width: 650px){
           .header-inner { padding: 0 12px; height: 56px; }
           .center-area { max-width:none; flex:0; margin-left:auto; }
@@ -54,10 +83,11 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
 
       <div className="header-inner">
         <div className="left-area">
-          <img src={clandeckLogo} alt="ClanDeck" className="logo-img" onClick={onDeck} />
+          {/* LOGO ALWAYS GOES TO DECK */}
+          <img src={clandeckLogo} alt="ClanDeck" className="logo-img" onClick={goToDeck} title="Go to Your Deck" />
           <div className="nav-desktop">
-            {navBtn('Your Deck', page==='deck', onDeck)}
-            {navBtn('Profile Edit', page==='profile' || page==='profile-edit' || page==='edit', onProfile)}
+            {navBtn('Your Deck', isDeck, goToDeck)}
+            {navBtn('Profile Edit', isProfile, goToProfileEdit)}
           </div>
         </div>
 
@@ -77,7 +107,7 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
 
         <div style={{display:'flex', alignItems:'center', gap:'8px', flexShrink:0}}>
           <div style={{width:'32px', height:'32px', background:'#f8f5f0', border:'1px solid #e9e2d6', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:'12px'}}>{initial}</div>
-          <button onClick={onLogout} style={{padding:'7px 12px', background:'#fff5f5', border:'1px solid #ffd1d1', borderRadius:'20px', fontSize:'11px', fontWeight:700, color:'#d33', cursor:'pointer'}}>Logout</button>
+          <button onClick={handleLogout} style={{padding:'7px 12px', background:'#fff5f5', border:'1px solid #ffd1d1', borderRadius:'20px', fontSize:'11px', fontWeight:700, color:'#d33', cursor:'pointer'}}>Logout</button>
           <button className="hamburger" onClick={()=>setOpen(!open)}>{open ? '✕' : '☰'}</button>
         </div>
       </div>
