@@ -26,7 +26,7 @@ const pool = mysql.createPool({
 });
 
 app.get('/', async (req, res) => {
-  try { const [rows] = await pool.query('SELECT NOW() as time'); res.json({ status: 'Clandeck API v2 - Same ID + Email Field FIXED', db: 'connected', time: rows[0].time }); }
+  try { const [rows] = await pool.query('SELECT NOW() as time'); res.json({ status: 'Clandeck API v3 - Upload Fixed + Same ID + Email', db: 'connected', time: rows[0].time }); }
   catch (e) { res.json({ status: 'API Running', db: 'disconnected', error: e.message }); }
 });
 
@@ -56,6 +56,35 @@ const handleLogin = async (req, res) => {
     res.json({ success: true, msg: `Welcome, ${user.name}!`, user: userData, id: userData.id, name: userData.name, uname: userData.uname, photo_url: userData.photo_url });
   } catch (err) { console.error(err); res.status(500).json({ success: false, msg: 'Database error', error: err.message }); }
 };
+
+// ===== UPLOAD FIX - FIXES YOUR ERROR =====
+app.post('/api/upload', async (req, res) => {
+  try {
+    const { image, photo, photo_url, file, base64 } = req.body;
+    let finalUrl = image || photo || photo_url || file || base64;
+    if (!finalUrl) return res.status(400).json({ success: false, error: 'No image data received' });
+    // Return as URL - frontend will save this to photo_url
+    res.json({ success: true, url: finalUrl, photo_url: finalUrl, message: 'Upload OK (base64 stored)' });
+  } catch (e) {
+    console.error('Upload error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+app.post('/api/profiles/upload', async (req, res) => {
+  try {
+    const { image, photo, photo_url, file } = req.body;
+    const finalUrl = image || photo || photo_url || file;
+    if(!finalUrl) return res.status(400).json({ success:false, error:'No image' });
+    res.json({ success: true, url: finalUrl, photo_url: finalUrl });
+  } catch(e){ res.status(500).json({ success:false, error:e.message }); }
+});
+app.post('/api/profiles/photo-upload', async (req, res) => {
+  try {
+    const { image, photo, photo_url } = req.body;
+    const finalUrl = image || photo || photo_url;
+    res.json({ success: true, url: finalUrl, photo_url: finalUrl });
+  } catch(e){ res.status(500).json({ success:false, error:e.message }); }
+});
 
 app.get('/api/profiles/family-tree', async (req, res) => {
   try {
@@ -176,7 +205,6 @@ app.get('/api/admin/local-file-structure', adminAuth, (req,res)=>{
 
 app.post('/api/login', handleLogin); 
 app.post('/api/auth/login', handleLogin);
-
 app.get('/api/test-users', async (req, res) => { try { const [rows] = await pool.query('SELECT id, uname, name, status FROM users LIMIT 5'); res.json({ success: true, count: rows.length, users: rows }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ===== FIXED PROFILE APIS - SAME ID + EMAIL FIELD =====
@@ -205,16 +233,10 @@ app.put('/api/profile/:id', async (req, res) => {
     await conn.beginTransaction();
     const id = req.params.id;
     const { display_name, name, nickname, gender, dob, email, mobile_number, mobile, visibility, show_in_deck, is_alive, dod, location, bio, photo_url } = req.body;
-
     const finalName = display_name || name;
     const finalMobile = mobile || mobile_number;
     const finalEmail = email;
-
-    await conn.query(
-      `UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), mobile = COALESCE(?, mobile), photo_url = COALESCE(?, photo_url) WHERE id = ?`,
-      [finalName, finalEmail, finalMobile, photo_url, id]
-    );
-
+    await conn.query(`UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), mobile = COALESCE(?, mobile), photo_url = COALESCE(?, photo_url) WHERE id = ?`, [finalName, finalEmail, finalMobile, photo_url, id]);
     await conn.query(
       `UPDATE profiles SET 
         display_name = COALESCE(?, display_name),
@@ -234,10 +256,9 @@ app.put('/api/profile/:id', async (req, res) => {
        WHERE id = ? OR owner_user_id = ?`,
       [finalName, nickname, gender, dob || null, finalMobile, finalEmail, visibility, show_in_deck, is_alive, dod || null, location, bio, photo_url, id, id]
     );
-
     await conn.commit();
     const [updated] = await pool.query(`SELECT p.*, u.email as user_email, u.mobile as user_mobile FROM profiles p LEFT JOIN users u ON u.id = p.id WHERE p.id = ? LIMIT 1`, [id]);
-    res.json({ success: true, message: 'Saved to both tables', data: updated[0] });
+    res.json({ success: true, message: 'Saved to both tables + photo', data: updated[0] });
   } catch (e) {
     await conn.rollback();
     console.error('PUT profile error:', e);
@@ -248,4 +269,4 @@ app.put('/api/profile/:id', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Clandeck API - Email Field Added + Same ID FIXED - Running on ${PORT}`));
+app.listen(PORT, () => console.log(`Clandeck API v3 - Upload Fixed - Running on ${PORT}`));
