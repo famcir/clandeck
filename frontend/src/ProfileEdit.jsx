@@ -1,300 +1,272 @@
 import React, { useState, useEffect } from 'react';
 import CommonHeader from './CommonHeader.jsx';
-const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const myUserId = storedUser?.id;
-
-  const [form, setForm] = useState({
-    display_name: '',
-    nickname: '',
-    gender: 'Male',
-    dob: '',
-    email: '',
-    mobile_number: '',
-    visibility: 'Public',
-    show_in_deck: 1,
-    is_alive: 1,
-    dod: '',
-    location: '',
-    bio: '',
-    photo_url: ''
-  });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState('');
-
-  // ===== FAMILY STATES - ADDED IN SAME FORMAT =====
   const [myProfile, setMyProfile] = useState(null);
   const [family, setFamily] = useState({ father:null, mother:null, siblings:[], spouses:[], children:[] });
   const [showAdd, setShowAdd] = useState(null);
   const [formName, setFormName] = useState('');
   const [formGender, setFormGender] = useState('Male');
+  const [selFather, setSelFather] = useState(true);
+  const [selMother, setSelMother] = useState(true);
   const [selSpouseId, setSelSpouseId] = useState('');
   const [birthOrder, setBirthOrder] = useState(1);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        // Try family-tree first (gets both own + family)
-        const res = await fetch(`${API_URL}/api/profiles/family-tree?user_id=${myUserId}`);
-        const j = await res.json();
-        if (j.success && j.myProfile) {
-          const d = j.myProfile;
-          setMyProfile(d);
-          setFamily(j.family);
-          setForm({
-            display_name: d.display_name || d.name || storedUser.name || '',
-            nickname: d.nickname || '',
-            gender: d.gender || 'Male',
-            dob: d.dob ? d.dob.split('T')[0] : '',
-            email: d.email || storedUser.email || '',
-            mobile_number: d.mobile_number || storedUser.mobile || '',
-            visibility: d.visibility || 'Public',
-            show_in_deck: d.show_in_deck ?? 1,
-            is_alive: d.is_alive ?? 1,
-            dod: d.dod ? d.dod.split('T')[0] : '',
-            location: d.location || '',
-            bio: d.bio || '',
-            photo_url: d.photo_url || storedUser.photo_url || ''
+  // ===== OWN PROFILE EDIT STATES - ADDED, SAME FORMAT =====
+  const [ownForm, setOwnForm] = useState({
+    display_name: '', nickname: '', gender: 'Male', dob: '', email: '',
+    mobile_number: '', visibility: 'Public', show_in_deck: 1, is_alive: 1, dod: '', photo_url: ''
+  });
+  const [preview, setPreview] = useState('');
+  const [savingOwn, setSavingOwn] = useState(false);
+  const [showOwnEdit, setShowOwnEdit] = useState(false);
+
+  const loadFamily = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/api/profiles/family-tree?user_id=${myUserId}`);
+      const j = await res.json();
+      if(j.success){
+        setMyProfile(j.myProfile);
+        setFamily(j.family);
+        if(j.family.spouses.length>0) setSelSpouseId(j.family.spouses[0].id);
+        setBirthOrder((j.family.children.length||0) + (j.family.siblings.length||0) + 1);
+        // Fill own form from same myProfile
+        const d = j.myProfile;
+        setOwnForm({
+          display_name: d.display_name || d.name || storedUser.name || '',
+          nickname: d.nickname || '',
+          gender: d.gender || 'Male',
+          dob: d.dob ? d.dob.split('T')[0] : '',
+          email: d.email || storedUser.email || '',
+          mobile_number: d.mobile_number || storedUser.mobile || '',
+          visibility: d.visibility || 'Public',
+          show_in_deck: d.show_in_deck ?? 1,
+          is_alive: d.is_alive ?? 1,
+          dod: d.dod ? d.dod.split('T')[0] : '',
+          photo_url: d.photo_url || storedUser.photo_url || ''
+        });
+        setPreview(d.photo_url || '');
+      } else {
+        if(j.error?.includes('Profile not found')){
+          const createRes = await fetch(`${API_URL}/api/profiles/auto-create`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ user_id: myUserId, display_name: storedUser.name, gender: 'Male' })
           });
-          setPreview(d.photo_url || '');
-          if (j.family.spouses.length > 0) setSelSpouseId(j.family.spouses[0].id);
-        } else {
-          // Fallback to old single profile API
-          const res2 = await fetch(`${API_URL}/api/profile/${myUserId}`);
-          const j2 = await res2.json();
-          if (j2.success && j2.data) {
-            const d = j2.data;
-            setForm({
-              display_name: d.display_name || d.name || storedUser.name || '',
-              nickname: d.nickname || '',
-              gender: d.gender || 'Male',
-              dob: d.dob ? d.dob.split('T')[0] : '',
-              email: d.email || d.user_email || storedUser.email || '',
-              mobile_number: d.mobile_number || d.user_mobile || storedUser.mobile || '',
-              visibility: d.visibility || 'Public',
-              show_in_deck: d.show_in_deck ?? 1,
-              is_alive: d.is_alive ?? 1,
-              dod: d.dod ? d.dod.split('T')[0] : '',
-              location: d.location || '',
-              bio: d.bio || '',
-              photo_url: d.photo_url || d.user_photo || storedUser.photo_url || ''
-            });
-            setPreview(d.photo_url || d.user_photo || '');
-          }
+          const cj = await createRes.json();
+          if(cj.success) loadFamily();
         }
-      } catch (e) { console.error(e); }
-      setLoading(false);
-    };
-    if (myUserId) load();
-  }, [myUserId]);
+      }
+    } catch(e){ console.error(e); } 
+    setLoading(false);
+  };
+  useEffect(()=>{ loadFamily(); }, []);
 
   useEffect(()=>{
     if(showAdd==='Father') setFormGender('Male');
     if(showAdd==='Mother') setFormGender('Female');
-    if(showAdd==='Spouse' && myProfile) setFormGender(myProfile.gender==='Male' ? 'Female' : 'Male');
+    if(showAdd==='Spouse' && myProfile){
+      setFormGender(myProfile.gender==='Male' ? 'Female' : 'Male');
+    }
   }, [showAdd]);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setForm(p => ({ ...p, [name]: value }));
-  };
-
-  // ===== IMAGE UPLOAD FIX - NO MORE <!DOCTYPE ERROR =====
-  const handleImageChange = (e) => {
+  // ===== OWN PROFILE: IMAGE UPLOAD FIX =====
+  const handleOwnImageChange = (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) return alert('Max 5MB image');
-
+    if(!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
       const base64 = ev.target.result;
       setPreview(base64);
-      setForm(p => ({ ...p, photo_url: base64 }));
+      setOwnForm(p => ({ ...p, photo_url: base64 }));
       try {
         const res = await fetch(`${API_URL}/api/upload`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ image: base64 })
         });
         const j = await res.json();
-        if (j.success && j.url) {
-          setForm(p => ({ ...p, photo_url: j.url }));
-          setPreview(j.url);
-        }
-      } catch (err) {
-        console.log('Using base64 directly, upload API fallback', err.message);
-      }
+        if(j.success && j.url){ setOwnForm(p=>({...p, photo_url:j.url})); setPreview(j.url); }
+      } catch{}
     };
     reader.readAsDataURL(file);
   };
 
-  // ===== SAVE OWN PROFILE =====
-  const handleSave = async () => {
-    setSaving(true);
-    try {
+  const handleOwnChange = (e) => {
+    const { name, value } = e.target;
+    setOwnForm(p => ({ ...p, [name]: value }));
+  };
+
+  // ===== SAVE OWN PROFILE - SEPARATE BUTTON =====
+  const handleSaveOwn = async () => {
+    setSavingOwn(true);
+    try{
       const res = await fetch(`${API_URL}/api/profile/${myUserId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method:'PUT', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-          display_name: form.display_name,
-          nickname: form.nickname,
-          gender: form.gender,
-          dob: form.dob || null,
-          email: form.email,
-          mobile_number: form.mobile_number,
-          mobile: form.mobile_number,
-          visibility: form.visibility,
-          show_in_deck: parseInt(form.show_in_deck),
-          is_alive: parseInt(form.is_alive),
-          dod: form.dod || null,
-          location: form.location,
-          bio: form.bio,
-          photo_url: form.photo_url
+          display_name: ownForm.display_name, nickname: ownForm.nickname,
+          gender: ownForm.gender, dob: ownForm.dob || null,
+          email: ownForm.email, mobile_number: ownForm.mobile_number, mobile: ownForm.mobile_number,
+          visibility: ownForm.visibility, show_in_deck: parseInt(ownForm.show_in_deck),
+          is_alive: parseInt(ownForm.is_alive), dod: ownForm.dod || null,
+          photo_url: ownForm.photo_url
         })
       });
       const j = await res.json();
-      if (!j.success) throw new Error(j.error || 'Save failed');
-      
-      const updatedUser = { ...storedUser, name: form.display_name, email: form.email, mobile: form.mobile_number, photo_url: form.photo_url };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      alert('Profile saved! Same ID updated in both users & profiles table');
-      if (onGoProfile) onGoProfile();
-    } catch (e) {
-      alert('Save failed: ' + e.message);
-    }
-    setSaving(false);
+      if(!j.success) throw new Error(j.error);
+      localStorage.setItem('user', JSON.stringify({ ...storedUser, name: ownForm.display_name, email: ownForm.email, mobile: ownForm.mobile_number, photo_url: ownForm.photo_url }));
+      alert('Own profile saved to both tables ✅');
+      setShowOwnEdit(false);
+      loadFamily();
+    }catch(e){ alert('Save failed: '+e.message); }
+    setSavingOwn(false);
   };
 
-  // ===== SAVE FAMILY MEMBER - SEPARATE SAVE BUTTON =====
-  const handleAddFamily = async () => {
+  const handleAdd = async () => {
     if(!formName.trim()) return alert('Enter name');
     if(!myProfile) return alert('My profile not loaded yet');
+    if((showAdd==='Sibling') && !family.father && !family.mother) return alert('Add Father/Mother first');
+    if((showAdd==='Child') && family.spouses.length===0) return alert('Add Spouse first');
+    if((showAdd==='Child') && !selSpouseId) return alert('Select spouse');
+
     const payload = {
       user_id: myUserId,
       owner_profile_id: myProfile.id,
       display_name: formName,
       gender: formGender,
       relation_type: showAdd,
-      birth_order: birthOrder,
+      father_id: showAdd==='Sibling' ? (selFather && family.father ? family.father.id : null) : null,
+      mother_id: showAdd==='Sibling' ? (selMother && family.mother ? family.mother.id : null) : null,
       spouse_id: showAdd==='Child' ? selSpouseId : null,
+      birth_order: birthOrder,
       show_in_deck: 1
     };
+
     const res = await fetch(`${API_URL}/api/profiles/family-add`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
     });
     const j = await res.json();
     if(!j.success) return alert(j.error);
+    
     setShowAdd(null); setFormName('');
-    // reload
-    const res2 = await fetch(`${API_URL}/api/profiles/family-tree?user_id=${myUserId}`);
-    const j2 = await res2.json();
-    if(j2.success){ setFamily(j2.family); }
+    loadFamily();
   };
 
-  if (loading) return <div style={{padding:40, textAlign:'center'}}>Loading...</div>;
+  const canAddSibling = family.father || family.mother;
+  const canAddChild = family.spouses.length > 0;
+
+  if(loading) return <div style={{padding:'40px', textAlign:'center'}}>Loading family...</div>;
 
   return (
     <div style={{minHeight:'100vh', background:'#f7f4ef'}}>
       <CommonHeader self={storedUser} page="profile-edit" onDeck={onGoDeck} onProfile={onGoProfile} onLogout={onLogout} />
-      
-      <div style={{maxWidth:'480px', margin:'0 auto', padding:'16px'}}>
-        {/* Photo Upload - SAME FORMAT */}
-        <div style={{background:'white', borderRadius:'14px', padding:'20px', textAlign:'center'}}>
-          <div style={{width:'100px', height:'100px', margin:'0 auto', borderRadius:'50%', background:'#eee', overflow:'hidden'}}>
-            {preview ? <img src={preview} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : <div style={{lineHeight:'100px', fontSize:'32px'}}>👤</div>}
+      <div style={{padding:'16px', maxWidth:'900px', margin:'0 auto'}}>
+        
+        {/* ===== OWN PROFILE CARD - SAME FORMAT, TOP ===== */}
+        <div style={{background:'white', borderRadius:'14px', padding:'16px', display:'flex', gap:'12px', alignItems:'center'}}>
+          <div style={{width:'64px', height:'64px', borderRadius:'12px', background:'#c9ad83', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:'24px', color:'white', overflow:'hidden'}}>
+            {preview ? <img src={preview} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : myProfile?.display_name?.[0] || 'U'}
           </div>
-          <label style={{display:'inline-block', marginTop:'12px', background:'black', color:'white', padding:'8px 16px', borderRadius:'20px', fontSize:'12px', cursor:'pointer'}}>
-            Choose File
-            <input type="file" accept="image/*" onChange={handleImageChange} style={{display:'none'}}/>
-          </label>
-          <div style={{fontSize:'10px', color:'#999', marginTop:'6px'}}>Drag image to move + / - to zoom</div>
-          <h3 style={{marginTop:'14px'}}>{form.display_name} {form.nickname && `(${form.nickname})`}</h3>
+          <div style={{flex:1}}>
+            <b>{ownForm.display_name || storedUser.name}</b>
+            <div style={{fontSize:'11px', color:'#888'}}>{ownForm.email} | {ownForm.mobile_number} | {family.father?'Father: '+family.father.display_name:'No Father'} | {family.mother?'Mother: '+family.mother.display_name:'No Mother'} • Spouses: {family.spouses.length} • Children: {family.children.length}</div>
+          </div>
+          <button onClick={()=>setShowOwnEdit(!showOwnEdit)} style={{background:'black', color:'white', borderRadius:'20px', padding:'10px 18px', fontSize:'11px', fontWeight:800, border:'none'}}> {showOwnEdit ? 'Close' : 'Edit Own Profile'}</button>
         </div>
 
-        <div style={{background:'white', borderRadius:'14px', padding:'16px', marginTop:'12px', display:'grid', gap:'12px'}}>
-          <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>FULL NAME</label><input name="display_name" value={form.display_name} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
-          
-          <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>NICK NAME</label><input name="nickname" value={form.nickname} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
-
-          <div style={{display:'flex', gap:'10px'}}>
-            <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>GENDER</label><select name="gender" value={form.gender} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}><option>Male</option><option>Female</option><option>Other</option></select></div>
-            <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>DOB</label><input type="date" name="dob" value={form.dob} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
-          </div>
-
-          <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>EMAIL</label><input name="email" value={form.email} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
-
-          <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>PHONE</label><input name="mobile_number" value={form.mobile_number} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
-
-          <div style={{background:'#faf7f2', padding:'12px', borderRadius:'10px', border:'1px solid #e9e2d6'}}>
-            <label style={{fontSize:'10px', fontWeight:800}}>PUBLIC VIEW</label>
-            <div style={{display:'flex', gap:'20px', marginTop:'6px'}}>
-              <label style={{fontSize:'12px', display:'flex', gap:'6px'}}><input type="radio" name="visibility" value="Public" checked={form.visibility==='Public'} onChange={handleChange}/> Public</label>
-              <label style={{fontSize:'12px', display:'flex', gap:'6px'}}><input type="radio" name="visibility" value="Private" checked={form.visibility==='Private'} onChange={handleChange}/> Private</label>
+        {/* ===== OWN EDIT FORM - EXPANDABLE, SAME INPUT STYLE ===== */}
+        {showOwnEdit && (
+          <div style={{background:'white', borderRadius:'14px', padding:'16px', marginTop:'12px', display:'grid', gap:'12px'}}>
+            <div style={{textAlign:'center'}}>
+              <div style={{width:'100px', height:'100px', margin:'0 auto', borderRadius:'12px', background:'#eee', overflow:'hidden'}}>
+                {preview ? <img src={preview} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : <div style={{lineHeight:'100px'}}>👤</div>}
+              </div>
+              <label style={{display:'inline-block', marginTop:'10px', background:'black', color:'white', padding:'8px 16px', borderRadius:'20px', fontSize:'11px', cursor:'pointer'}}>
+                Choose File <input type="file" accept="image/*" onChange={handleOwnImageChange} style={{display:'none'}}/>
+              </label>
             </div>
-            <label style={{fontSize:'10px', fontWeight:800, marginTop:'10px', display:'block'}}>SHOW IN DECK</label>
-            <select name="show_in_deck" value={form.show_in_deck} onChange={handleChange} style={{width:'100%', padding:'10px', borderRadius:'8px', border:'1px solid #ddd', marginTop:'6px'}}>
-              <option value={1}>Yes - Show in Deck</option>
-              <option value={0}>No - Hide in Deck</option>
-            </select>
-            <div style={{fontSize:'10px', color:'#999', marginTop:'6px'}}>If Private, your name will show as Hidden in Deck.jsx</div>
-          </div>
 
-          <div style={{display:'flex', gap:'10px'}}>
-            <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800}}>IS ALIVE</label><select name="is_alive" value={form.is_alive} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}><option value={1}>Yes</option><option value={0}>No</option></select></div>
-            {parseInt(form.is_alive)===0 && <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800}}>DOD</label><input type="date" name="dod" value={form.dod} onChange={handleChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}/></div>}
+            <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>FULL NAME</label><input name="display_name" value={ownForm.display_name} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
+            <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>NICK NAME</label><input name="nickname" value={ownForm.nickname} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
+            <div style={{display:'flex', gap:'10px'}}>
+              <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>GENDER</label><select name="gender" value={ownForm.gender} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}><option>Male</option><option>Female</option></select></div>
+              <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>DOB</label><input type="date" name="dob" value={ownForm.dob} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
+            </div>
+            <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>EMAIL</label><input name="email" value={ownForm.email} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
+            <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>PHONE</label><input name="mobile_number" value={ownForm.mobile_number} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
+            <div style={{display:'flex', gap:'10px'}}>
+              <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>PUBLIC VIEW</label><select name="visibility" value={ownForm.visibility} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}><option>Public</option><option>Private</option></select></div>
+              <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>SHOW IN DECK</label><select name="show_in_deck" value={ownForm.show_in_deck} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}><option value={1}>Yes</option><option value={0}>No</option></select></div>
+            </div>
+            <div style={{display:'flex', gap:'10px'}}>
+              <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>IS ALIVE</label><select name="is_alive" value={ownForm.is_alive} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}><option value={1}>Yes</option><option value={0}>No</option></select></div>
+              {parseInt(ownForm.is_alive)===0 && <div style={{flex:1}}><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>DOD</label><input type="date" name="dod" value={ownForm.dod} onChange={handleOwnChange} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>}
+            </div>
+            <button onClick={handleSaveOwn} disabled={savingOwn} style={{background:'black', color:'white', padding:'14px', borderRadius:'30px', border:'none', fontWeight:800}}>{savingOwn ? 'Saving...' : 'Save Own Profile (Same ID)'}</button>
           </div>
+        )}
 
-          <button onClick={handleSave} disabled={saving} style={{background:'black', color:'white', padding:'14px', borderRadius:'30px', border:'none', fontWeight:800, marginTop:'8px'}}>
-            {saving ? 'Saving...' : 'Save Profile (Same ID)'}
-          </button>
+        <div style={{display:'flex', gap:'8px', flexWrap:'wrap', marginTop:'16px'}}>
+          {!family.father && <button onClick={()=>setShowAdd('Father')} style={{background:'black', color:'white', borderRadius:'20px', padding:'10px 18px', fontSize:'12px', fontWeight:800, border:'none'}}> + Add Father</button>}
+          {!family.mother && <button onClick={()=>setShowAdd('Mother')} style={{background:'black', color:'white', borderRadius:'20px', padding:'10px 18px', fontSize:'12px', fontWeight:800, border:'none'}}> + Add Mother</button>}
+          <button disabled={!canAddSibling} onClick={()=>{setSelFather(!!family.father); setSelMother(!!family.mother); setShowAdd('Sibling')}} style={{background: canAddSibling?'#fff':'#eee', border:'1px solid #e9e2d6', borderRadius:'20px', padding:'10px 18px', fontSize:'12px', fontWeight:800, opacity: canAddSibling?1:0.5, cursor: canAddSibling?'pointer':'not-allowed'}}> + Add Sibling {!canAddSibling && '(Add parents first)'}</button>
+          <button onClick={()=>setShowAdd('Spouse')} style={{background:'#fff', border:'1px solid #e9e2d6', borderRadius:'20px', padding:'10px 18px', fontSize:'12px', fontWeight:800}}> + Add Spouse {family.spouses.length>0 && `(${family.spouses.length})`}</button>
+          <button disabled={!canAddChild} onClick={()=>{setSelSpouseId(family.spouses[0]?.id||''); setShowAdd('Child')}} style={{background: canAddChild?'#fff':'#eee', border:'1px solid #e9e2d6', borderRadius:'20px', padding:'10px 18px', fontSize:'12px', fontWeight:800, opacity: canAddChild?1:0.5, cursor: canAddChild?'pointer':'not-allowed'}}> + Add Child {!canAddChild && '(Add spouse first)'}</button>
         </div>
 
-        {/* ===== FAMILY SECTION - SAME FORMAT, SEPARATE SAVE ===== */}
-        <div style={{background:'white', borderRadius:'14px', padding:'16px', marginTop:'12px', display:'grid', gap:'12px'}}>
-          <label style={{fontSize:'12px', fontWeight:800}}>FAMILY MEMBERS</label>
-          <div style={{fontSize:'10px', color:'#888'}}>Spouses: {family.spouses.length} | Children: {family.children.length} | Siblings: {family.siblings.length}</div>
-          
-          <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
-            {!family.father && <button onClick={()=>setShowAdd('Father')} style={{background:'black', color:'white', borderRadius:'20px', padding:'10px 16px', fontSize:'11px', fontWeight:800, border:'none'}}> + Add Father</button>}
-            {!family.mother && <button onClick={()=>setShowAdd('Mother')} style={{background:'black', color:'white', borderRadius:'20px', padding:'10px 16px', fontSize:'11px', fontWeight:800, border:'none'}}> + Add Mother</button>}
-            <button onClick={()=>setShowAdd('Sibling')} style={{background:'#fff', border:'1px solid #ddd', borderRadius:'20px', padding:'10px 16px', fontSize:'11px', fontWeight:800}}> + Add Sibling</button>
-            <button onClick={()=>setShowAdd('Spouse')} style={{background:'#fff', border:'1px solid #ddd', borderRadius:'20px', padding:'10px 16px', fontSize:'11px', fontWeight:800}}> + Add Spouse</button>
-            <button onClick={()=>setShowAdd('Child')} style={{background:'#fff', border:'1px solid #ddd', borderRadius:'20px', padding:'10px 16px', fontSize:'11px', fontWeight:800}}> + Add Child</button>
-          </div>
-
-          <div style={{background:'#faf7f2', padding:'12px', borderRadius:'10px', border:'1px solid #e9e2d6', display:'grid', gap:'6px'}}>
-            {family.father && <div style={{fontSize:'11px'}}>Father: <b>{family.father.display_name}</b></div>}
-            {family.mother && <div style={{fontSize:'11px'}}>Mother: <b>{family.mother.display_name}</b></div>}
-            {family.spouses.map(s=> <div key={s.id} style={{fontSize:'11px'}}>Spouse {s.spouse_number}: <b>{s.display_name}</b></div>)}
-            {family.children.map(c=> <div key={c.id} style={{fontSize:'11px'}}>Child: <b>{c.display_name}</b></div>)}
-            {family.siblings.map(s=> <div key={s.id} style={{fontSize:'11px'}}>Sibling: <b>{s.display_name}</b></div>)}
-            {family.spouses.length===0 && family.children.length===0 && family.siblings.length===0 && !family.father && !family.mother && <div style={{fontSize:'11px', color:'#aaa'}}>No family members added yet</div>}
-          </div>
+        <div style={{marginTop:'16px', display:'grid', gap:'12px'}}>
+          <div style={{background:'white', borderRadius:'12px', padding:'14px'}}><b style={{fontSize:'12px'}}>Spouses ({family.spouses.length}) - Multiple supported</b><div style={{display:'flex', gap:'8px', marginTop:'8px', flexWrap:'wrap'}}>{family.spouses.map(s=><div key={s.id} style={{background:'#faf7f2', padding:'8px 12px', borderRadius:'20px', fontSize:'11px', border:'1px solid #e9e2d6'}}>{s.display_name} - Group {s.spouse_group} No {s.spouse_number}</div>)}{family.spouses.length===0 && <span style={{fontSize:'11px', color:'#aaa'}}>No spouse added</span>}</div></div>
+          <div style={{background:'white', borderRadius:'12px', padding:'14px'}}><b style={{fontSize:'12px'}}>Siblings ({family.siblings.length}) - Step detection</b><div style={{display:'flex', gap:'8px', marginTop:'8px', flexWrap:'wrap'}}>{family.siblings.map(s=><div key={s.id} style={{background:'#faf7f2', padding:'8px 12px', borderRadius:'20px', fontSize:'11px', border:'1px solid #e9e2d6'}}>{s.display_name} - {s.father_id && s.mother_id ? 'Full' : s.father_id ? 'Paternal (Father side)' : 'Maternal (Mother side)'}</div>)}{family.siblings.length===0 && <span style={{fontSize:'11px', color:'#aaa'}}>No siblings</span>}</div></div>
+          <div style={{background:'white', borderRadius:'12px', padding:'14px'}}><b style={{fontSize:'12px'}}>Children ({family.children.length}) - From different spouses</b><div style={{display:'flex', gap:'8px', marginTop:'8px', flexWrap:'wrap'}}>{family.children.map(c=><div key={c.id} style={{background:'#faf7f2', padding:'8px 12px', borderRadius:'20px', fontSize:'11px', border:'1px solid #e9e2d6'}}>{c.display_name} - from {family.spouses.find(s=>s.id===c.spouse_parent_id)?.display_name||'Spouse'} (Order {c.birth_order})</div>)}{family.children.length===0 && <span style={{fontSize:'11px', color:'#aaa'}}>No children</span>}</div></div>
         </div>
 
-        {/* FAMILY ADD MODAL */}
         {showAdd && (
           <div style={{position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:'16px'}} onClick={()=>setShowAdd(null)}>
-            <div style={{background:'white', borderRadius:'14px', padding:'16px', width:'100%', maxWidth:'400px', display:'grid', gap:'12px'}} onClick={e=>e.stopPropagation()}>
-              <label style={{fontSize:'12px', fontWeight:800}}>ADD {showAdd?.toUpperCase()}</label>
-              <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>FULL NAME</label><input value={formName} onChange={e=>setFormName(e.target.value)} placeholder={`${showAdd} Name*`} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}}/></div>
-              <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>GENDER</label><select value={formGender} onChange={e=>setFormGender(e.target.value)} disabled={showAdd==='Father'||showAdd==='Mother'} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', background: (showAdd==='Father'||showAdd==='Mother')?'#f5f5f5':'white'}}><option>Male</option><option>Female</option></select></div>
-              {showAdd==='Child' && family.spouses.length>0 && (
-                <div><label style={{fontSize:'10px', fontWeight:800, color:'#888'}}>SELECT SPOUSE</label><select value={selSpouseId} onChange={e=>setSelSpouseId(e.target.value)} style={{width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid #ddd'}}>{family.spouses.map(s=><option key={s.id} value={s.id}>{s.display_name}</option>)}</select></div>
+            <div style={{background:'white', borderRadius:'16px', padding:'22px', width:'100%', maxWidth:'400px'}} onClick={e=>e.stopPropagation()}>
+              <h3 style={{fontWeight:800, margin:0}}>Add {showAdd}</h3>
+              <p style={{fontSize:'11px', color:'#888', marginTop:'4px'}}>{showAdd==='Father'?'Father will be auto-linked as your father': showAdd==='Mother'?'Mother will be auto-linked': showAdd==='Sibling'?'Select parents to identify step sibling': showAdd==='Spouse'?'Supports multiple spouses with group': 'Select which spouse is parent'}</p>
+              
+              <input value={formName} onChange={e=>setFormName(e.target.value)} placeholder={`${showAdd} Name*`} style={{width:'100%', marginTop:'14px', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', boxSizing:'border-box'}} />
+              
+              <select value={formGender} onChange={e=>setFormGender(e.target.value)} disabled={showAdd==='Father' || showAdd==='Mother'} style={{width:'100%', marginTop:'10px', padding:'12px', borderRadius:'10px', border:'1px solid #ddd', background: (showAdd==='Father'||showAdd==='Mother')?'#f5f5f5':'white'}}>
+                <option>Male</option><option>Female</option>
+              </select>
+
+              {showAdd==='Sibling' && (
+                <div style={{marginTop:'14px', background:'#faf7f2', padding:'12px', borderRadius:'10px', border:'1px solid #e9e2d6'}}>
+                  <p style={{fontSize:'11px', fontWeight:800, margin:0}}>Select Parents (step logic):</p>
+                  {family.father && <label style={{display:'flex', gap:'8px', fontSize:'12px', marginTop:'10px', cursor:'pointer'}}><input type="checkbox" checked={selFather} onChange={e=>setSelFather(e.target.checked)}/> Father: {family.father.display_name}</label>}
+                  {family.mother && <label style={{display:'flex', gap:'8px', fontSize:'12px', marginTop:'8px', cursor:'pointer'}}><input type="checkbox" checked={selMother} onChange={e=>setSelMother(e.target.checked)}/> Mother: {family.mother.display_name}</label>}
+                  {!family.father && !family.mother && <p style={{fontSize:'11px', color:'red'}}>Add parents first</p>}
+                  <div style={{marginTop:'10px', fontSize:'10px', fontWeight:800, color:'#8a6a3a', background:'white', padding:'6px 10px', borderRadius:'20px', display:'inline-block'}}>{selFather && selMother ? '→ Full Sibling' : selFather ? '→ Paternal Half Sibling (Step)' : selMother ? '→ Maternal Half Sibling (Step)' : '→ Select at least one'}</div>
+                </div>
               )}
-              <div style={{display:'flex', gap:'10px', marginTop:'8px'}}>
-                <button onClick={()=>setShowAdd(null)} style={{flex:1, padding:'12px', borderRadius:'30px', border:'1px solid #ddd', background:'white', fontWeight:700}}>Cancel</button>
-                <button onClick={handleAddFamily} style={{flex:1, padding:'12px', borderRadius:'30px', border:'none', background:'black', color:'white', fontWeight:800}}>Save {showAdd}</button>
+
+              {showAdd==='Child' && (
+                <div style={{marginTop:'14px', background:'#faf7f2', padding:'12px', borderRadius:'10px', border:'1px solid #e9e2d6'}}>
+                  <p style={{fontSize:'11px', fontWeight:800, margin:0}}>Child is from which spouse? (Required)</p>
+                  {family.spouses.map(sp=>(
+                    <label key={sp.id} style={{display:'flex', gap:'8px', fontSize:'12px', marginTop:'10px', cursor:'pointer', background: selSpouseId===sp.id ? 'white' : 'transparent', padding:'6px', borderRadius:'8px', border: selSpouseId===sp.id ? '1px solid #c9ad83' : '1px solid transparent'}}><input type="radio" name="spouse" checked={selSpouseId===sp.id} onChange={()=>setSelSpouseId(sp.id)}/> {sp.display_name} (Spouse {sp.spouse_number} - Group {sp.spouse_group})</label>
+                  ))}
+                  <div style={{marginTop:'12px', display:'flex', alignItems:'center', gap:'8px'}}><label style={{fontSize:'11px', fontWeight:700}}>Birth Order:</label><input type="number" min="1" value={birthOrder} onChange={e=>setBirthOrder(parseInt(e.target.value)||1)} style={{width:'70px', padding:'8px', borderRadius:'8px', border:'1px solid #ddd'}} /></div>
+                </div>
+              )}
+
+              {showAdd!=='Child' && showAdd!=='Sibling' && (
+                <div style={{marginTop:'12px'}}><label style={{fontSize:'11px', fontWeight:700}}>Birth Order:</label><input type="number" min="1" value={birthOrder} onChange={e=>setBirthOrder(parseInt(e.target.value)||1)} style={{width:'70px', marginLeft:'8px', padding:'8px', borderRadius:'8px', border:'1px solid #ddd'}} /></div>
+              )}
+
+              <div style={{display:'flex', gap:'10px', marginTop:'20px'}}>
+                <button onClick={()=>setShowAdd(null)} style={{flex:1, padding:'12px', borderRadius:'20px', border:'1px solid #ddd', background:'white', fontWeight:700}}>Cancel</button>
+                <button onClick={handleAdd} style={{flex:2, padding:'12px', borderRadius:'20px', border:'none', background:'black', color:'white', fontWeight:800}}>Add {showAdd} + Auto Update</button>
               </div>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
