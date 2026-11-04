@@ -26,7 +26,7 @@ const pool = mysql.createPool({
 });
 
 app.get('/', async (req, res) => {
-  try { const [rows] = await pool.query('SELECT NOW() as time'); res.json({ status: 'Clandeck API v2 - Same ID + File Structure FIXED PATH', db: 'connected', time: rows[0].time }); }
+  try { const [rows] = await pool.query('SELECT NOW() as time'); res.json({ status: 'Clandeck API v2 - Same ID + Email Field FIXED', db: 'connected', time: rows[0].time }); }
   catch (e) { res.json({ status: 'API Running', db: 'disconnected', error: e.message }); }
 });
 
@@ -133,7 +133,6 @@ const adminAuth = (req, res, next) => { const key = req.headers["x-admin-key"] |
 app.get('/api/admin/all-tables', adminAuth, async (req, res) => { try { const [tablesRaw] = await pool.query('SHOW TABLES'); const tableNames = tablesRaw.map(t => Object.values(t)[0]); const result = {}; for (const tName of tableNames) { try { const [countRes] = await pool.query(`SELECT COUNT(*) as count FROM \`${tName}\``); const [colsDetail] = await pool.query(`SHOW COLUMNS FROM \`${tName}\``); const [rows] = await pool.query(`SELECT * FROM \`${tName}\` ORDER BY id DESC LIMIT 50`); result[tName] = { totalCount: countRes[0].count, columns: colsDetail.map(c => c.Field), columnsDetail: colsDetail, rows: rows }; } catch (e) { result[tName] = { totalCount: 0, columns: [], columnsDetail: [], rows: [] }; } } res.json(result); } catch (err) { res.status(500).json({ success: false, message: err.message }); } });
 app.get('/api/admin/stats', adminAuth, async (req, res) => { try { const [usersCount] = await pool.query('SELECT COUNT(*) as count FROM users'); const [latestUsers] = await pool.query('SELECT id, uname, name, email, mobile, status, created_at FROM users ORDER BY id DESC LIMIT 20'); const [tables] = await pool.query('SHOW TABLES'); res.json({ success: true, counts: { users: usersCount[0].count }, latestUsers, tables: tables.map(t => Object.values(t)[0]) }); } catch (err) { res.status(500).json({ success: false, message: err.message }); } });
 
-// FILE TREE HELPER - FIXED TO AVOID /bin /boot etc
 function getTree(dir, depth=0, maxDepth=4){
   if(depth>maxDepth) return [];
   try{
@@ -157,42 +156,96 @@ function getTree(dir, depth=0, maxDepth=4){
   }catch{ return []; }
 }
 
-// 1. DEPLOYED FILE STRUCTURE - FIXED PATH
 app.get('/api/admin/file-structure', adminAuth, (req,res)=>{
   try{
-    const deployedRoot = __dirname; // backend folder - NOT parent, so we don't go to /
-    const tree = { 
-      name: 'clandeck-project (Deployed)', 
-      type: 'folder', 
-      source:'deployed', 
-      rootPath: deployedRoot,
-      path: deployedRoot,
-      children: getTree(deployedRoot,0,4) 
-    };
+    const deployedRoot = __dirname;
+    const tree = { name: 'clandeck-project (Deployed)', type: 'folder', source:'deployed', rootPath: deployedRoot, path: deployedRoot, children: getTree(deployedRoot,0,4) };
     res.json(tree);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
-// 2. LOCAL FILE STRUCTURE - FIXED PATH
 app.get('/api/admin/local-file-structure', adminAuth, (req,res)=>{
   try{
     const possibleRoot = path.join(__dirname, '..');
     const hasPkg = fs.existsSync(path.join(possibleRoot, 'package.json')) || fs.existsSync(path.join(possibleRoot, 'frontend', 'package.json')) || fs.existsSync(path.join(__dirname, 'package.json'));
     const localRoot = hasPkg ? possibleRoot : __dirname;
-    const tree = { 
-      name: 'clandeck-project (Local)', 
-      type: 'folder', 
-      source:'local',
-      rootPath: localRoot,
-      path: localRoot,
-      children: getTree(localRoot,0,6) 
-    };
+    const tree = { name: 'clandeck-project (Local)', type: 'folder', source:'local', rootPath: localRoot, path: localRoot, children: getTree(localRoot,0,6) };
     res.json(tree);
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
-app.post('/api/login', handleLogin); app.post('/api/auth/login', handleLogin);
+app.post('/api/login', handleLogin); 
+app.post('/api/auth/login', handleLogin);
+
 app.get('/api/test-users', async (req, res) => { try { const [rows] = await pool.query('SELECT id, uname, name, status FROM users LIMIT 5'); res.json({ success: true, count: rows.length, users: rows }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/profile/:id', async (req, res) => { try { const [rows] = await pool.query('SELECT * FROM profiles WHERE id = ? OR owner_user_id = ? LIMIT 1', [req.params.id, req.params.id]); if(rows.length===0) return res.json({ success:false }); res.json({ success:true, data: rows[0] }); } catch(e){ res.status(500).json({ success:false }); } });
+
+// ===== FIXED PROFILE APIS - SAME ID + EMAIL FIELD =====
+app.get('/api/profile/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const [rows] = await pool.query(
+      `SELECT p.*, u.email as user_email, u.mobile as user_mobile, u.name as user_name, u.photo_url as user_photo 
+       FROM profiles p 
+       LEFT JOIN users u ON u.id = p.id 
+       WHERE p.id = ? OR p.owner_user_id = ? 
+       LIMIT 1`,
+      [id, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, error: 'Profile not found' });
+    res.json({ success: true, data: rows[0] });
+  } catch (e) {
+    console.error('GET profile error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.put('/api/profile/:id', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const id = req.params.id;
+    const { display_name, name, nickname, gender, dob, email, mobile_number, mobile, visibility, show_in_deck, is_alive, dod, location, bio, photo_url } = req.body;
+
+    const finalName = display_name || name;
+    const finalMobile = mobile || mobile_number;
+    const finalEmail = email;
+
+    await conn.query(
+      `UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), mobile = COALESCE(?, mobile), photo_url = COALESCE(?, photo_url) WHERE id = ?`,
+      [finalName, finalEmail, finalMobile, photo_url, id]
+    );
+
+    await conn.query(
+      `UPDATE profiles SET 
+        display_name = COALESCE(?, display_name),
+        nickname = COALESCE(?, nickname),
+        gender = COALESCE(?, gender),
+        dob = ?,
+        mobile_number = COALESCE(?, mobile_number),
+        email = COALESCE(?, email),
+        visibility = COALESCE(?, visibility),
+        show_in_deck = COALESCE(?, show_in_deck),
+        is_alive = COALESCE(?, is_alive),
+        dod = ?,
+        location = COALESCE(?, location),
+        bio = COALESCE(?, bio),
+        photo_url = COALESCE(?, photo_url),
+        updated_at = NOW()
+       WHERE id = ? OR owner_user_id = ?`,
+      [finalName, nickname, gender, dob || null, finalMobile, finalEmail, visibility, show_in_deck, is_alive, dod || null, location, bio, photo_url, id, id]
+    );
+
+    await conn.commit();
+    const [updated] = await pool.query(`SELECT p.*, u.email as user_email, u.mobile as user_mobile FROM profiles p LEFT JOIN users u ON u.id = p.id WHERE p.id = ? LIMIT 1`, [id]);
+    res.json({ success: true, message: 'Saved to both tables', data: updated[0] });
+  } catch (e) {
+    await conn.rollback();
+    console.error('PUT profile error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Clandeck API - FIXED PATH - Running on ${PORT} - __dirname: ${__dirname}`));
+app.listen(PORT, () => console.log(`Clandeck API - Email Field Added + Same ID FIXED - Running on ${PORT}`));
