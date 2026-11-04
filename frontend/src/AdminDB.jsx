@@ -17,11 +17,12 @@ function FileTree({ node, level = 0 }) {
   );
 }
 
-// Build tree from local folder picker files
 function buildLocalTree(files){
-  const root = { name: 'Local Folder', type:'folder', children:[] };
+  const root = { name: 'Local Folder', type:'folder', children:[], rootPath:'', fullPath:'' };
   const map = {'': root};
+  let firstPath = '';
   for(let f of files){
+    if(!firstPath) firstPath = f.webkitRelativePath;
     const parts = f.webkitRelativePath.split('/');
     let curPath = '';
     for(let i=0;i<parts.length;i++){
@@ -36,14 +37,17 @@ function buildLocalTree(files){
       }
     }
   }
-  return root.children[0] || root;
+  const finalTree = root.children[0] || root;
+  finalTree.rootPath = firstPath ? firstPath.split('/')[0] : 'Local';
+  finalTree.fullPath = firstPath;
+  return finalTree;
 }
 
 export default function AdminDB() {
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState('');
   const [err, setErr] = useState("");
-  const [activeTab, setActiveTab] = useState('tables'); // tables | files | local
+  const [activeTab, setActiveTab] = useState('tables');
   const [fileStructure, setFileStructure] = useState(null);
   const [localFileStructure, setLocalFileStructure] = useState(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -80,7 +84,7 @@ export default function AdminDB() {
       const json = await res.json();
       setFileStructure(json);
     }catch(e){
-      setFileStructure({ name: 'clandeck-project', type:'folder', children:[
+      setFileStructure({ name: 'clandeck-project', type:'folder', rootPath: '/app (fallback)', children:[
         {name:'frontend', type:'folder', children:[{name:'src', type:'folder', children:[{name:'App.jsx', type:'file'}]}]},
         {name:'backend', type:'folder', children:[{name:'server.js', type:'file'}]}
       ]});
@@ -91,7 +95,6 @@ export default function AdminDB() {
   const loadLocalFileStructure = async () => {
     setLoadingFiles(true);
     try{
-      // Try local backend first (when you run npm run dev locally)
       let res = null;
       try{ res = await fetch(`http://localhost:3000/api/admin/local-file-structure`, { headers: { "x-admin-key": localStorage.getItem("admin_key") || "clandeck_2026_admin" } }); }catch{}
       if(!res || !res.ok){
@@ -100,7 +103,7 @@ export default function AdminDB() {
       const json = await res.json();
       setLocalFileStructure(json);
     }catch(e){
-      setLocalFileStructure({ name: 'No local API - Pick folder below', type:'folder', children:[], needPicker:true });
+      setLocalFileStructure({ name: 'No local API - Pick folder below', type:'folder', children:[], rootPath: 'Not connected', needPicker:true });
     }
     setLoadingFiles(false);
   };
@@ -181,9 +184,13 @@ export default function AdminDB() {
 
           {activeTab==='files' && (
             <>
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px'}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px'}}>
                 <h1 style={{fontSize:'28px', fontWeight:'bold'}}>File Structure (Deployed - Railway)</h1>
                 <button onClick={loadFileStructure} style={{background:'white', border:'1px solid #ccc', padding:'6px 14px', borderRadius:'20px', cursor:'pointer', fontSize:'12px'}}>{loadingFiles ? 'Loading...' : '🔄 Refresh Live'}</button>
+              </div>
+              <div style={{marginBottom:'16px', background:'#f1f5f9', border:'1px solid #e5e7eb', borderRadius:'8px', padding:'10px 14px', display:'flex', alignItems:'center', gap:8}}>
+                <span style={{fontSize:'12px', fontWeight:700, color:'#6b7280'}}>📍 Path:</span>
+                <span style={{fontFamily:'monospace', fontSize:'12px', color:'#111', fontWeight:600}}>{fileStructure?.rootPath || fileStructure?.name || '/app (Deployed)'}</span>
               </div>
               <div style={{background:'white', borderRadius:'10px', border:'1px solid #e5e7eb', padding:'16px', minHeight:'60vh'}}>
                 {fileStructure ? <FileTree node={fileStructure} /> : <div>Loading files...</div>}
@@ -193,13 +200,23 @@ export default function AdminDB() {
 
           {activeTab==='local' && (
             <>
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', gap:12, flexWrap:'wrap'}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap'}}>
                 <h1 style={{fontSize:'28px', fontWeight:'bold'}}>Local File Structure (Laptop)</h1>
                 <div style={{display:'flex', gap:8}}>
                   <button onClick={loadLocalFileStructure} style={{background:'white', border:'1px solid #ccc', padding:'6px 14px', borderRadius:'20px', cursor:'pointer', fontSize:'12px'}}>{loadingFiles ? 'Loading...' : '🔄 Refresh from API'}</button>
                   <button onClick={()=>folderInputRef.current?.click()} style={{background:'#111', color:'white', border:'1px solid #111', padding:'6px 14px', borderRadius:'20px', cursor:'pointer', fontSize:'12px'}}>📂 Choose Local Folder</button>
                 </div>
               </div>
+
+              {/* PATH JUST BELOW TITLE - REQUIRED */}
+              <div style={{marginTop:'10px', marginBottom:'16px', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'10px 14px', display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+                <span style={{fontSize:'12px', fontWeight:800, color:'#92400e', whiteSpace:'nowrap'}}>📍 Path:</span>
+                <span style={{fontFamily:'monospace', fontSize:'13px', color:'#111', fontWeight:700, wordBreak:'break-all'}}>
+                  {localFileStructure?.rootPath || localFileStructure?.fullPath || localFileStructure?.name || 'Not loaded - Click Choose Local Folder or Refresh from API'}
+                </span>
+                <button onClick={()=>{const p=localFileStructure?.rootPath||localFileStructure?.fullPath||''; if(p) navigator.clipboard.writeText(p)}} style={{marginLeft:'auto', fontSize:'10px', background:'white', border:'1px solid #fcd34d', borderRadius:'6px', padding:'4px 8px', cursor:'pointer'}}>Copy</button>
+              </div>
+
               <input ref={folderInputRef} type="file" webkitdirectory="true" directory="" multiple style={{display:'none'}} onChange={handleLocalFolderPick} />
               <div style={{background:'white', borderRadius:'10px', border:'1px solid #e5e7eb', padding:'16px', minHeight:'60vh'}}>
                 {localFileStructure ? <FileTree node={localFileStructure} /> : <div>Click "Choose Local Folder" to pick your clandeck-project folder from laptop, or Refresh from API if running locally.</div>}
