@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || "https://clandeck-production.up.railway.app";
+const API_URL = import.meta.env.VITE_API_URL || "https://api.clandeck.com";
 
 function FileTree({ node, level = 0 }) {
   const [open, setOpen] = useState(level < 2);
@@ -44,6 +44,12 @@ function buildLocalTree(files){
 }
 
 export default function AdminDB() {
+  // The admin key lives ONLY in memory (React state). It is never saved in the code,
+  // in localStorage, or in a VITE_ variable. You type it each time you open this page.
+  const [adminKey, setAdminKey] = useState('');
+  const [keyInput, setKeyInput] = useState('');
+  const [unlocking, setUnlocking] = useState(false);
+
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState('');
   const [err, setErr] = useState("");
@@ -53,56 +59,79 @@ export default function AdminDB() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const folderInputRef = useRef(null);
 
-  useEffect(() => {
-    fetch(`${API_URL}/api/admin/all-tables`, {
-      headers: { "x-admin-key": localStorage.getItem("admin_key") || "clandeck_2026_admin" }
-    })
-      .then(async r => {
-        const text = await r.text();
-        try { return JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
-      })
-      .then(d => {
-        let normalized = d;
-        if (d.tables && Array.isArray(d.tables)) {
-          const obj = {};
-          d.tables.forEach(t => { const name = t.name || t; obj[name] = { totalCount: t.count || 0, columns: t.columns || [], columnsDetail: [], rows: [] }; });
-          normalized = obj;
-        }
-        if (normalized.success && normalized.tables) normalized = normalized.tables;
-        const keys = Object.keys(normalized).filter(k => k !== 'success');
-        if (keys.length === 0) throw new Error("No tables found");
-        setData(normalized);
-        setSelected(keys[0]);
-      })
-      .catch(e => setErr(e.message));
-  }, []);
+  // Remove any old key that earlier versions of this page saved in the browser
+  useEffect(() => { try { localStorage.removeItem('admin_key'); } catch {} }, []);
+
+  const adminFetch = (path, key = adminKey, base = API_URL) =>
+    fetch(`${base}${path}`, { headers: { 'x-admin-key': key } });
+
+  const lock = (message = '') => {
+    setAdminKey('');
+    setKeyInput('');
+    setData(null);
+    setSelected('');
+    setFileStructure(null);
+    setLocalFileStructure(null);
+    setErr(message);
+  };
+
+  const handleUnlock = async () => {
+    const key = keyInput.trim();
+    if (!key) { setErr('Please type the admin key'); return; }
+    setUnlocking(true);
+    setErr('');
+    try {
+      const r = await adminFetch('/api/admin/all-tables', key);
+      if (r.status === 401) throw new Error('Wrong admin key');
+      const text = await r.text();
+      let d;
+      try { d = JSON.parse(text); } catch { throw new Error(text.slice(0, 200)); }
+
+      let normalized = d;
+      if (d.tables && Array.isArray(d.tables)) {
+        const obj = {};
+        d.tables.forEach(t => { const name = t.name || t; obj[name] = { totalCount: t.count || 0, columns: t.columns || [], columnsDetail: [], rows: [] }; });
+        normalized = obj;
+      }
+      if (normalized.success && normalized.tables) normalized = normalized.tables;
+      const keys = Object.keys(normalized).filter(k => k !== 'success');
+      if (keys.length === 0) throw new Error('No tables found');
+
+      setData(normalized);
+      setSelected(keys[0]);
+      setAdminKey(key);
+      setKeyInput('');
+    } catch (e) {
+      setErr(e.message);
+    }
+    setUnlocking(false);
+  };
 
   const loadFileStructure = async () => {
     setLoadingFiles(true);
-    try{
-      const res = await fetch(`${API_URL}/api/admin/file-structure`, { headers: { "x-admin-key": localStorage.getItem("admin_key") || "clandeck_2026_admin" } });
+    try {
+      const res = await adminFetch('/api/admin/file-structure');
+      if (res.status === 401) { lock('Wrong or expired admin key'); return; }
       const json = await res.json();
       setFileStructure(json);
-    }catch(e){
-      setFileStructure({ name: 'clandeck-project', type:'folder', rootPath: '/app (fallback)', children:[
-        {name:'frontend', type:'folder', children:[{name:'src', type:'folder', children:[{name:'App.jsx', type:'file'}]}]},
-        {name:'backend', type:'folder', children:[{name:'server.js', type:'file'}]}
-      ]});
+    } catch (e) {
+      setFileStructure({ name: 'Could not load file structure', type: 'folder', rootPath: 'Error: ' + e.message, children: [] });
     }
     setLoadingFiles(false);
   };
 
   const loadLocalFileStructure = async () => {
     setLoadingFiles(true);
-    try{
+    try {
       let res = null;
-      try{ res = await fetch(`http://localhost:3000/api/admin/local-file-structure`, { headers: { "x-admin-key": localStorage.getItem("admin_key") || "clandeck_2026_admin" } }); }catch{}
-      if(!res || !res.ok){
-        res = await fetch(`${API_URL}/api/admin/local-file-structure`, { headers: { "x-admin-key": localStorage.getItem("admin_key") || "clandeck_2026_admin" } });
+      try { res = await adminFetch('/api/admin/local-file-structure', adminKey, 'http://localhost:3000'); } catch {}
+      if (!res || !res.ok) {
+        res = await adminFetch('/api/admin/local-file-structure');
       }
+      if (res.status === 401) { lock('Wrong or expired admin key'); return; }
       const json = await res.json();
       setLocalFileStructure(json);
-    }catch(e){
+    } catch (e) {
       setLocalFileStructure({ name: 'No local API - Pick folder below', type:'folder', children:[], rootPath: 'Not connected', needPicker:true });
     }
     setLoadingFiles(false);
@@ -116,11 +145,45 @@ export default function AdminDB() {
     setLocalFileStructure(tree);
   };
 
-  useEffect(()=>{ if(activeTab==='files' && !fileStructure) loadFileStructure(); },[activeTab]);
-  useEffect(()=>{ if(activeTab==='local' && !localFileStructure) loadLocalFileStructure(); },[activeTab]);
+  useEffect(() => { if (adminKey && activeTab === 'files' && !fileStructure) loadFileStructure(); }, [activeTab, adminKey]);
+  useEffect(() => { if (adminKey && activeTab === 'local' && !localFileStructure) loadLocalFileStructure(); }, [activeTab, adminKey]);
 
-  if(err) return <div style={{padding:20, color:'red'}}>Error: {err}<br/>Check backend {API_URL}/api/admin/all-tables</div>
-  if(!data) return <div style={{padding:20}}>Loading... from {API_URL}</div>
+  // ===== LOCKED SCREEN: asks for the admin key =====
+  if (!adminKey) {
+    return (
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#f8fafc', padding:20 }}>
+        <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:12, padding:24, width:'100%', maxWidth:360 }}>
+          <h2 style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>🔒 Admin Panel</h2>
+          <p style={{ fontSize:13, color:'#6b7280', marginBottom:16 }}>Type the admin key to continue.</p>
+          <input
+            type="password"
+            value={keyInput}
+            onChange={e => setKeyInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleUnlock(); }}
+            placeholder="Admin key"
+            autoComplete="off"
+            style={{ width:'100%', padding:'10px 12px', borderRadius:8, border:'1px solid #d1d5db', fontSize:15, boxSizing:'border-box' }}
+          />
+          {err && <div style={{ color:'#dc2626', fontSize:13, marginTop:10 }}>{err}</div>}
+          <button
+            onClick={handleUnlock}
+            disabled={unlocking}
+            style={{ marginTop:14, width:'100%', background:'#111', color:'white', border:'none', padding:'10px 14px', borderRadius:8, fontWeight:700, cursor:'pointer' }}
+          >
+            {unlocking ? 'Checking...' : 'Unlock'}
+          </button>
+          <button
+            onClick={() => (window.location.href = '/')}
+            style={{ marginTop:8, width:'100%', background:'white', border:'1px solid #ccc', padding:'8px 14px', borderRadius:8, cursor:'pointer', fontSize:13 }}
+          >
+            ← Back to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return <div style={{padding:20}}>Loading...</div>;
 
   const tables = Object.keys(data);
   const current = data[selected];
@@ -140,7 +203,8 @@ export default function AdminDB() {
           <button onClick={()=>{setActiveTab('local'); if(!localFileStructure) loadLocalFileStructure();}} style={btnStyle(activeTab==='local')}>💻 Local File Structure</button>
         </div>
         <div style={{marginTop:16, fontSize:'10px', color:'#999'}}>Deployed vs Local</div>
-        <button onClick={()=>window.location.href='/'} style={{marginTop:20, width:'100%', background:'white', border:'1px solid #ccc', padding:'6px 14px', borderRadius:'20px', cursor:'pointer', fontSize:'12px'}}>← Back to Home</button>
+        <button onClick={()=>lock()} style={{marginTop:20, width:'100%', background:'white', border:'1px solid #ccc', padding:'6px 14px', borderRadius:'20px', cursor:'pointer', fontSize:'12px'}}>🔒 Lock</button>
+        <button onClick={()=>window.location.href='/'} style={{marginTop:8, width:'100%', background:'white', border:'1px solid #ccc', padding:'6px 14px', borderRadius:'20px', cursor:'pointer', fontSize:'12px'}}>← Back to Home</button>
       </div>
 
       <div style={{flex:1, padding:'20px', overflow:'auto'}}>
