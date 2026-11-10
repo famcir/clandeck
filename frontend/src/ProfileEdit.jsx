@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CommonHeader from './CommonHeader.jsx';
-const API_URL = import.meta.env.VITE_API_URL || "https://clandeck-production.up.railway.app";
+const API_URL = import.meta.env.VITE_API_URL || "https://api.clandeck.com";
+
+// Longest side of the saved "original" photo (keeps uploads small and fast)
+const MAX_ORIGINAL_SIDE = 1600;
 
 export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -9,10 +12,11 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  // PHOTO - new fields
+  // PHOTO
   const [photoOriginal, setPhotoOriginal] = useState(''); // photo_original_url
   const [photoCompressed, setPhotoCompressed] = useState(''); // photo_compressed_url
   const [photoUrl, setPhotoUrl] = useState(''); // photo_url (for compatibility)
+  const [photoDirty, setPhotoDirty] = useState(false); // true when a new photo was chosen or moved/zoomed
   const [zoom, setZoom] = useState(1);
   const [pos, setPos] = useState({x:0, y:0});
   const [dragging, setDragging] = useState(false);
@@ -75,44 +79,67 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const onMouseMove = (e) => {
     if(!dragging) return;
     setPos({x: (e.touches ? e.touches[0].clientX : e.clientX) - startPos.x, y: (e.touches ? e.touches[0].clientY : e.clientY) - startPos.y});
+    setPhotoDirty(true);
   };
   const onMouseUp = () => setDragging(false);
 
+  const changeZoom = (fn) => { setZoom(fn); setPhotoDirty(true); };
+
+  // Choose a file: shrink it (longest side 1600px) and keep it as the "original"
   const handleImage = (e) => {
     const file = e.target.files[0];
     if(!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const base64 = ev.target.result;
-      setPhotoOriginal(base64); // original
-      setPhotoUrl(base64);
-      setPhotoCompressed(''); // will generate on save
-      setZoom(1); setPos({x:0, y:0});
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(1, MAX_ORIGINAL_SIDE / Math.max(img.width, img.height));
+        const w = Math.round(img.width * ratio);
+        const h = Math.round(img.height * ratio);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const base64 = canvas.toDataURL('image/jpeg', 0.9);
+        setPhotoOriginal(base64);
+        setPhotoUrl(base64);
+        setPhotoCompressed('');
+        setZoom(1); setPos({x:0, y:0});
+        setPhotoDirty(true);
+      };
+      img.onerror = () => alert('This image could not be read. Please choose a JPG or PNG photo.');
+      img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
+  // Makes the 400x400 "compressed" picture exactly as it looks in the preview box
   const getCroppedImage = async () => {
-    if(!photoOriginal) return photoUrl;
-    return new Promise((resolve)=>{
+    if(!photoOriginal) return '';
+    return new Promise((resolve, reject)=>{
+      const size = 400;
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const size = 400; // final compressed size
       canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
       const img = new Image();
-      img.src = photoOriginal;
+      img.crossOrigin = 'anonymous'; // needed when the original comes from the bucket URL
       img.onload = () => {
-        ctx.fillStyle = 'white'; ctx.fillRect(0,0,size,size);
-        const scale = zoom;
         const contW = containerRef.current?.clientWidth || 160;
-        const imgW = contW * scale;
-        const imgH = (img.height / img.width) * contW * scale;
-        const centerX = size/2 + (pos.x * (size/contW));
-        const centerY = size/2 + (pos.y * (size/contW));
-        ctx.drawImage(img, centerX - imgW/2 * (size/contW), centerY - imgH/2 * (size/contW), imgW * (size/contW), imgH * (size/contW));
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+        const k = size / contW;
+        const base = Math.max(contW / img.width, contW / img.height); // same as objectFit: cover
+        const drawW = img.width * base * zoom * k;
+        const drawH = img.height * base * zoom * k;
+        const cx = size / 2 + pos.x * k;
+        const cy = size / 2 + pos.y * k;
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, size, size);
+        ctx.drawImage(img, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
+        try { resolve(canvas.toDataURL('image/jpeg', 0.8)); }
+        catch { reject(new Error('Could not process the photo')); }
       };
-      img.onerror = () => resolve(photoOriginal);
+      img.onerror = () => reject(new Error('Could not load the photo'));
+      img.src = photoOriginal;
     });
   };
 
@@ -121,41 +148,25 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const handleSave = async () => {
     setSaving(true);
     try{
-      let compressedBase64 = photoCompressed;
-      let originalUrl = photoOriginal;
-      
-      // Generate compressed from positioned image
-      if(photoOriginal){
-        compressedBase64 = await getCroppedImage();
-      }
-
-      let finalOriginalUrl = originalUrl;
-      let finalCompressedUrl = compressedBase64;
+      let finalOriginalUrl = photoOriginal;
+      let finalCompressedUrl = photoCompressed || photoUrl;
       let bucketKey = '';
 
-      // Try upload to get real URLs (if upload works)
-      try{
-        if(compressedBase64 && compressedBase64.startsWith('data:')){
-          const res = await fetch(`${API_URL}/api/upload`, {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ image: compressedBase64, type: 'compressed' })
-          });
-          const txt = await res.text();
-          try{ const j=JSON.parse(txt); if(j.success&&j.url){ finalCompressedUrl=j.url; bucketKey=j.key||''; } }catch{}
-        }
-        if(originalUrl && originalUrl.startsWith('data:')){
-          const res2 = await fetch(`${API_URL}/api/upload`, {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ image: originalUrl, type: 'original' })
-          });
-          const txt2 = await res2.text();
-          try{ const j2=JSON.parse(txt2); if(j2.success&&j2.url){ finalOriginalUrl=j2.url; } }catch{}
-        }
-      }catch{}
-
-      // If upload failed, keep base64 (now LONGTEXT so ok)
-      if(!finalCompressedUrl) finalCompressedUrl = compressedBase64;
-      if(!finalOriginalUrl) finalOriginalUrl = originalUrl;
+      // Upload to the bucket only when the photo was changed (new file, moved or zoomed)
+      if(photoOriginal && photoDirty){
+        const compressed = await getCroppedImage();
+        const body = { compressed };
+        if(photoOriginal.startsWith('data:')) body.original = photoOriginal;
+        const pr = await fetch(`${API_URL}/api/profile/${userId}/photo`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        const pj = await pr.json().catch(()=>({}));
+        if(!pr.ok || !pj.success) throw new Error(pj.error || 'Photo upload failed');
+        finalCompressedUrl = pj.compressed_url;
+        if(pj.original_url) finalOriginalUrl = pj.original_url;
+        bucketKey = pj.bucket_key || '';
+      }
 
       const payload = {
         display_name: form.display_name, nickname: form.nickname, gender: form.gender,
@@ -163,11 +174,10 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
         mobile_number: form.mobile_number, visibility: form.visibility,
         show_in_deck: parseInt(form.show_in_deck), is_alive: parseInt(form.is_alive),
         dod: form.dod || null, bio: form.bio, location: form.location,
-        // NEW PHOTO FIELDS
-        photo_url: finalCompressedUrl || finalOriginalUrl,
-        photo_original_url: finalOriginalUrl,
-        photo_compressed_url: finalCompressedUrl,
-        photo_bucket_key: bucketKey,
+        photo_url: finalCompressedUrl || null,
+        photo_original_url: finalOriginalUrl || null,
+        photo_compressed_url: finalCompressedUrl || null,
+        photo_bucket_key: bucketKey || null,
         photo_x: pos.x,
         photo_y: pos.y,
         photo_zoom: zoom
@@ -179,8 +189,15 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       });
       const j = await res.json();
       if(!j.success) throw new Error(j.error);
+
+      // Photo is now stored in the bucket: switch the page to the short URLs
+      setPhotoOriginal(finalOriginalUrl || '');
+      setPhotoCompressed(finalCompressedUrl || '');
+      setPhotoUrl(finalCompressedUrl || '');
+      setPhotoDirty(false);
+
       localStorage.setItem('user', JSON.stringify({...storedUser, name: form.display_name, photo_url: finalCompressedUrl}));
-      alert('Saved with photo position ✅');
+      alert('Saved ✅');
     }catch(e){ alert('Save failed: '+e.message); }
     setSaving(false);
   };
@@ -210,9 +227,10 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const labelStyle = {fontSize:'9px', fontWeight:800, color:'#8a7a65', letterSpacing:'0.5px', marginBottom:'6px', display:'block'};
 
   return (
-    <div style={{minHeight:'100vh', background:'#f7f4ef'}} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onTouchMove={onMouseMove} onTouchEnd={onMouseUp}>
+    <div style={{minHeight:'100vh', width:'100%', background:'#f7f4ef'}} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onTouchMove={onMouseMove} onTouchEnd={onMouseUp}>
       <CommonHeader self={storedUser} page="profile-edit" onDeck={onGoDeck} onProfile={onGoProfile} onLogout={onLogout} />
-      <div style={{maxWidth:'1100px', margin:'0 auto', padding:'16px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px'}}>
+      {/* FULL WIDTH: two columns on wide screens, one column on small screens */}
+      <div style={{width:'100%', boxSizing:'border-box', padding:'16px 24px', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap:'16px', alignItems:'start'}}>
         
         {/* LEFT - PERSONAL WITH PHOTO TOOL */}
         <div>
@@ -225,15 +243,17 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
               ) : <div style={{lineHeight:'160px', fontSize:'50px'}}>👤</div>}
             </div>
             <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:'10px', marginTop:'12px'}}>
-              <button onClick={()=>setZoom(z=>Math.max(1, z-0.1))} style={{width:'30px', height:'30px', borderRadius:'50%', border:'1px solid #ddd', background:'white', fontWeight:800}}>-</button>
-              <span style={{fontSize:'10px', color:'#888'}}>Drag to move • +/- zoom → saved as x,y,zoom</span>
-              <button onClick={()=>setZoom(z=>Math.min(3, z+0.1))} style={{width:'30px', height:'30px', borderRadius:'50%', border:'1px solid #ddd', background:'white', fontWeight:800}}>+</button>
+              <button onClick={()=>changeZoom(z=>Math.max(1, z-0.1))} style={{width:'30px', height:'30px', borderRadius:'50%', border:'1px solid #ddd', background:'white', fontWeight:800}}>-</button>
+              <span style={{fontSize:'10px', color:'#888'}}>Drag to move • +/- zoom</span>
+              <button onClick={()=>changeZoom(z=>Math.min(3, z+0.1))} style={{width:'30px', height:'30px', borderRadius:'50%', border:'1px solid #ddd', background:'white', fontWeight:800}}>+</button>
             </div>
             <label style={{display:'inline-block', marginTop:'14px', background:'#111', color:'white', padding:'8px 18px', borderRadius:'20px', fontSize:'11px', fontWeight:800, cursor:'pointer'}}>
               Choose File <input type="file" accept="image/*" onChange={handleImage} style={{display:'none'}}/>
             </label>
             <div style={{fontWeight:800, fontSize:'16px', marginTop:'12px'}}>{form.display_name || 'Your Name'} {form.nickname && `(${form.nickname})`}</div>
-            <div style={{fontSize:'10px', color:'#999', marginTop:'4px'}}>Original: {photoOriginal ? '✓' : 'No'} | Compressed: {photoCompressed ? '✓' : 'No'} | x:{pos.x.toFixed(0)} y:{pos.y.toFixed(0)} z:{zoom.toFixed(1)}</div>
+            <div style={{fontSize:'10px', color:'#999', marginTop:'4px'}}>
+              {photoDirty ? 'Photo changed - press Save to upload' : (photoOriginal ? 'Photo saved ✓' : 'No photo yet')}
+            </div>
           </div>
 
           <div style={{background:'white', borderRadius:'14px', padding:'16px', marginTop:'12px', display:'flex', flexDirection:'column', gap:'14px'}}>

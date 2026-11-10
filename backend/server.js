@@ -4,11 +4,12 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 
 // ===== STARTUP CHECK: warn if a required variable is missing =====
-['MYSQLHOST', 'MYSQLUSER', 'MYSQLPASSWORD', 'MYSQL_DATABASE', 'MYSQLPORT', 'ADMIN_KEY'].forEach((name) => {
+['MYSQLHOST', 'MYSQLUSER', 'MYSQLPASSWORD', 'MYSQL_DATABASE', 'MYSQLPORT', 'ADMIN_KEY', 'ENDPOINT', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY', 'RAILWAY_BUCKET_NAME'].forEach((name) => {
   if (!process.env[name]) console.error(`WARNING: environment variable ${name} is not set`);
 });
 
@@ -308,7 +309,8 @@ app.put('/api/profile/:id', async (req, res) => {
   try {
     await conn.beginTransaction();
     const id = req.params.id;
-    const { display_name, name, nickname, gender, dob, email, mobile_number, mobile, visibility, show_in_deck, is_alive, dod, location, bio, photo_url } = req.body;
+    const { display_name, name, nickname, gender, dob, email, mobile_number, mobile, visibility, show_in_deck, is_alive, dod, location, bio, photo_url,
+      photo_original_url, photo_compressed_url, photo_bucket_key, photo_x, photo_y, photo_zoom } = req.body;
     const finalName = display_name || name;
     const finalMobile = mobile || mobile_number;
     const finalEmail = email;
@@ -329,9 +331,17 @@ app.put('/api/profile/:id', async (req, res) => {
         bio = COALESCE(?, bio),
         photo_url = COALESCE(?, photo_url),
         updated_at = NOW()
-       WHERE id = ? OR owner_user_id = ?`,
+       WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1)`,
       [finalName, nickname, gender, dob || null, finalMobile, finalEmail, visibility, show_in_deck, is_alive, dod || null, location, bio, photo_url, id, id]
     );
+    // Photo position fields: saved only if these columns exist in the profiles table
+    const photoExtras = { photo_original_url, photo_compressed_url, photo_bucket_key, photo_x, photo_y, photo_zoom };
+    const [profileCols] = await conn.query('SHOW COLUMNS FROM profiles');
+    const existingCols = new Set(profileCols.map(c => c.Field));
+    for (const [col, val] of Object.entries(photoExtras)) {
+      if (val === undefined || val === null || !existingCols.has(col)) continue;
+      await conn.query(`UPDATE profiles SET \`${col}\` = ? WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1)`, [val, id, id]);
+    }
     await conn.commit();
     const [updated] = await pool.query(`SELECT p.*, u.email as user_email, u.mobile as user_mobile FROM profiles p LEFT JOIN users u ON u.id = p.id WHERE p.id = ? LIMIT 1`, [id]);
     res.json({ success: true, message: 'Saved to both tables + photo', data: updated[0] });
@@ -341,6 +351,78 @@ app.put('/api/profile/:id', async (req, res) => {
     res.status(500).json({ success: false, error: e.message });
   } finally {
     conn.release();
+  }
+});
+
+// ===== PROFILE PHOTOS IN THE RAILWAY BUCKET =====
+// Layout inside the bucket:  <userId>/profileimg/compressed.jpg  and  <userId>/profileimg/original.jpg
+// Uploading again writes to the SAME file names, so the old image is replaced (no duplicates).
+// (A bucket has no real folders: "<userId>/profileimg/" is a key prefix, created automatically on first upload.)
+const s3 = new S3Client({
+  region: process.env.REGION || 'auto',
+  endpoint: process.env.ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.SECRET_ACCESS_KEY || ''
+  }
+});
+const BUCKET = process.env.RAILWAY_BUCKET_NAME;
+const PUBLIC_API_URL = process.env.PUBLIC_API_URL || 'https://api.clandeck.com';
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const jpegDataUrlToBuffer = (dataUrl) => {
+  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');
+  if (!m) return null;
+  const buf = Buffer.from(m[1], 'base64');
+  return buf.length > 0 && buf.length <= MAX_IMAGE_BYTES ? buf : null;
+};
+
+app.post('/api/profile/:id/photo', async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    if (!SAFE_ID.test(id)) return res.status(400).json({ success: false, error: 'Invalid id' });
+
+    const [u] = await pool.query('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
+    if (u.length === 0) return res.status(404).json({ success: false, error: 'User not found' });
+
+    const { compressed, original } = req.body;
+    const compressedBuf = jpegDataUrlToBuffer(compressed);
+    if (!compressedBuf) return res.status(400).json({ success: false, error: 'Invalid or too large compressed image' });
+    let originalBuf = null;
+    if (original) {
+      originalBuf = jpegDataUrlToBuffer(original);
+      if (!originalBuf) return res.status(400).json({ success: false, error: 'Invalid or too large original image' });
+    }
+
+    const prefix = `${id}/profileimg`;
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: `${prefix}/compressed.jpg`, Body: compressedBuf, ContentType: 'image/jpeg' }));
+    if (originalBuf) {
+      await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: `${prefix}/original.jpg`, Body: originalBuf, ContentType: 'image/jpeg' }));
+    }
+
+    const v = Date.now(); // changes the URL so browsers show the new image right away
+    res.json({
+      success: true,
+      compressed_url: `${PUBLIC_API_URL}/api/photos/${id}/compressed.jpg?v=${v}`,
+      original_url: originalBuf ? `${PUBLIC_API_URL}/api/photos/${id}/original.jpg?v=${v}` : null,
+      bucket_key: prefix
+    });
+  } catch (e) {
+    console.error('Photo upload error:', e);
+    res.status(500).json({ success: false, error: 'Photo upload failed' });
+  }
+});
+
+app.get('/api/photos/:id/:file', async (req, res) => {
+  const { id, file } = req.params;
+  if (!SAFE_ID.test(id) || !['compressed.jpg', 'original.jpg'].includes(file)) return res.status(404).end();
+  try {
+    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `${id}/profileimg/${file}` }));
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' });
+    out.Body.pipe(res);
+  } catch (e) {
+    res.status(404).end();
   }
 });
 
