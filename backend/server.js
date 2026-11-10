@@ -67,9 +67,9 @@ const handleLogin = async (req, res) => {
     try {
       const [pExist] = await pool.query(`SELECT id FROM profiles WHERE owner_user_id = ? OR id = ? LIMIT 1`, [user.id, user.id]);
       if (pExist.length === 0) {
-        await pool.query(`INSERT INTO profiles (id, owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 'Male', 1, 1, NOW())`, [user.id, user.id, user.name, user.name]);
+        await pool.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, 'Male', 1, 1, NOW())`, [user.id, user.id, user.name]);
       } else {
-        await pool.query(`UPDATE profiles SET display_name = ?, name = ? WHERE (owner_user_id = ? OR id = ?) AND (display_name='Hidden' OR display_name='' OR display_name IS NULL)`, [user.name, user.name, user.id, user.id]);
+        await pool.query(`UPDATE profiles SET display_name = ? WHERE (owner_user_id = ? OR id = ?) AND (display_name='Hidden' OR display_name='' OR display_name IS NULL)`, [user.name, user.id, user.id]);
       }
     } catch (e) { console.log('auto-create profile skipped:', e.message); }
     const userData = { id: user.id, name: user.name, uname: user.uname, username: user.uname || user.id, mobile: user.mobile, email: user.email, photo_url: user.photo_url, status: user.status };
@@ -139,7 +139,7 @@ app.post('/api/profiles/auto-create', async (req, res) => {
     if (exists.length > 0) return res.json({ success: true, data: exists[0] });
     let name = display_name;
     if (!name) { const [u] = await pool.query(`SELECT name FROM users WHERE id = ? LIMIT 1`, [user_id]); name = u[0]?.name || 'User'; }
-    await pool.query(`INSERT INTO profiles (id, owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, NOW())`, [user_id, user_id, name, name, gender || 'Male']);
+    await pool.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 1, NOW())`, [user_id, user_id, name, gender || 'Male']);
     const [rows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [user_id]);
     res.json({ success: true, data: rows[0] });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -160,7 +160,7 @@ app.post('/api/profiles/family-add', async (req, res) => {
     const [uuidRow] = await conn.query(`SELECT UUID() as uuid`); const genId = uuidRow[0].uuid;
     let newProfileId = genId;
     if (relation_type === 'Father' || relation_type === 'Mother') {
-      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, ?, 1, 0, NOW())`, [genId, owner.owner_user_id, display_name, display_name, gender || (relation_type === 'Father' ? 'Male' : 'Female')]);
+      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 0, NOW())`, [genId, owner.owner_user_id, display_name, gender || (relation_type === 'Father' ? 'Male' : 'Female')]);
       if (relation_type === 'Father') await conn.query(`UPDATE profiles SET father_id = ? WHERE id = ?`, [newProfileId, owner_profile_id]);
       else await conn.query(`UPDATE profiles SET mother_id = ? WHERE id = ?`, [newProfileId, owner_profile_id]);
       await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [owner_profile_id, newProfileId, relation_type]);
@@ -168,11 +168,11 @@ app.post('/api/profiles/family-add', async (req, res) => {
     } else if (relation_type === 'Spouse') {
       const [maxGroup] = await conn.query(`SELECT MAX(spouse_group) as maxg FROM profile_relations WHERE owner_profile_id = ? AND relation_type='Spouse'`, [owner_profile_id]);
       const spouse_group = (maxGroup[0].maxg || 0) + 1;
-      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, ?, 1, 0, NOW())`, [genId, owner.owner_user_id, display_name, display_name, gender]);
+      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 0, NOW())`, [genId, owner.owner_user_id, display_name, gender]);
       await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, created_at) VALUES (?, ?, 'Spouse', ?, ?, NOW())`, [owner_profile_id, newProfileId, spouse_group, spouse_group]);
       await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, created_at) VALUES (?, ?, 'Spouse', ?, ?, NOW())`, [newProfileId, owner_profile_id, spouse_group, spouse_group]);
     } else {
-      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, name, gender, father_id, mother_id, show_in_deck, is_claimed, birth_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`, [genId, owner.owner_user_id, display_name, display_name, gender, father_id || null, mother_id || null, birth_order || 1]);
+      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, father_id, mother_id, show_in_deck, is_claimed, birth_order, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`, [genId, owner.owner_user_id, display_name, gender, father_id || null, mother_id || null, birth_order || 1]);
     }
     await conn.commit();
     const [newProfileRows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [newProfileId]);
