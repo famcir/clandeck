@@ -127,6 +127,9 @@ app.get('/api/profiles/family-tree', async (req, res) => {
       else if (rel.relation_type === 'Spouse') { profile.spouse_group = rel.spouse_group; profile.spouse_number = rel.spouse_number; spouses.push(profile); }
       else if (rel.relation_type === 'Child') { profile.spouse_group = rel.spouse_group; profile.birth_order = rel.birth_order; children.push(profile); }
     }
+    // Parents saved only in profiles.father_id / mother_id (no relation row) still show up
+    if (!father && myProfile.father_id) { const [f] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [myProfile.father_id]); father = f[0] || null; }
+    if (!mother && myProfile.mother_id) { const [m] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [myProfile.mother_id]); mother = m[0] || null; }
     res.json({ success: true, myProfile, family: { father, mother, siblings, spouses, children } });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -182,11 +185,37 @@ app.post('/api/profiles/family-add', async (req, res) => {
       [a, b, type, o.spouse_group ?? null, o.spouse_number ?? null, o.birth_order ?? null]
     );
 
+    // ----- helpers for linking parents as spouses of each other -----
+    const nextSpouseNo = async (pid) => {
+      const [[r]] = await conn.query(`SELECT COALESCE(MAX(spouse_number), 0) AS n FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Spouse'`, [pid]);
+      return Number(r.n) + 1;
+    };
+    const spouseGroupOf = async (a, b) => {
+      const [r] = await conn.query(`SELECT spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Spouse' LIMIT 1`, [a, b]);
+      return r.length ? r[0].spouse_group : null;
+    };
+    // Makes A and B spouses of each other (if they are not yet) and puts their shared children under that marriage
+    const linkParents = async (aId, bId, childIds) => {
+      let ga = await spouseGroupOf(aId, bId);
+      let gb = await spouseGroupOf(bId, aId);
+      if (ga === null || gb === null) {
+        const nA = await nextSpouseNo(aId); const nB = await nextSpouseNo(bId);
+        ga = String(nA); gb = String(nB);
+        await addRel(aId, bId, 'Spouse', { spouse_group: ga, spouse_number: nA });
+        await addRel(bId, aId, 'Spouse', { spouse_group: gb, spouse_number: nB });
+      }
+      for (const cid of childIds) {
+        await conn.query(`UPDATE profile_relations SET spouse_group = ? WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Child' AND spouse_group IS NULL`, [ga, aId, cid]);
+        await conn.query(`UPDATE profile_relations SET spouse_group = ? WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Child' AND spouse_group IS NULL`, [gb, bId, cid]);
+      }
+    };
+
     if (relation_type === 'Father' || relation_type === 'Mother') {
       const isFather = relation_type === 'Father';
       const col = isFather ? 'father_id' : 'mother_id';
+      const otherParentId = isFather ? owner.mother_id : owner.father_id;
       if (owner[col]) return fail(409, `${relation_type} is already added`);
-      await addProfile(gender || (isFather ? 'Male' : 'Female'), null, null);
+      await addProfile(isFather ? 'Male' : 'Female', null, null); // gender is fixed by the relation
       await conn.query(`UPDATE profiles SET ${col} = ? WHERE id = ?`, [newId, ownerId]);
       await addRel(ownerId, newId, relation_type);
       await addRel(newId, ownerId, 'Child');
@@ -197,38 +226,44 @@ app.post('/api/profiles/family-add', async (req, res) => {
         await addRel(sb.id, newId, relation_type);
         await addRel(newId, sb.id, 'Child');
       }
+      // when both parents exist they become spouses of each other, so each parent's own page shows the children under the spouse
+      if (otherParentId) await linkParents(newId, otherParentId, [ownerId, ...sibs.map(sb => sb.id)]);
 
     } else if (relation_type === 'Spouse') {
-      const [[mx]] = await conn.query(`SELECT COALESCE(MAX(spouse_number), 0) AS n FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Spouse'`, [ownerId]);
-      const n = Number(mx.n) + 1;
+      const n = await nextSpouseNo(ownerId);
       await addProfile(gender || (owner.gender === 'Female' ? 'Male' : 'Female'), null, null);
       await addRel(ownerId, newId, 'Spouse', { spouse_group: String(n), spouse_number: n });
-      await addRel(newId, ownerId, 'Spouse', { spouse_group: '1', spouse_number: 1 }); // for the new spouse, you are their first
+      await addRel(newId, ownerId, 'Spouse', { spouse_group: '1', spouse_number: 1 }); // for the new spouse, the owner is the first
 
     } else if (relation_type === 'Child') {
-      if (!spouse_id) return fail(400, 'Add a spouse first, then add children');
-      const [rel] = await conn.query(
-        `SELECT spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Spouse' LIMIT 1`,
-        [ownerId, spouse_id]
+      const [mySpouses] = await conn.query(
+        `SELECT related_profile_id AS id, spouse_group FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Spouse' ORDER BY CAST(spouse_group AS UNSIGNED)`,
+        [ownerId]
       );
-      if (rel.length === 0) return fail(400, 'Please choose one of the spouses');
+      if (mySpouses.length === 0) return fail(400, 'Add a spouse first, then add children');
+      // the spouse is chosen by the person; with only one spouse it is picked automatically
+      const chosen = spouse_id ? mySpouses.find(sp => sp.id === spouse_id) : (mySpouses.length === 1 ? mySpouses[0] : null);
+      if (!chosen) return fail(400, spouse_id ? 'Please choose one of the spouses' : 'Please select the spouse this child belongs to');
+      const spouseId = chosen.id;
       const ownerIsFemale = owner.gender === 'Female';
-      const fatherId = ownerIsFemale ? spouse_id : ownerId;
-      const motherId = ownerIsFemale ? ownerId : spouse_id;
-      const [[cnt]] = await conn.query(
-        `SELECT COUNT(*) AS c FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Child' AND spouse_group = ?`,
-        [ownerId, rel[0].spouse_group]
+      const fatherId = ownerIsFemale ? spouseId : ownerId;
+      const motherId = ownerIsFemale ? ownerId : spouseId;
+      const [olderKids] = await conn.query(
+        `SELECT related_profile_id AS id FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Child' AND spouse_group = ?`,
+        [ownerId, chosen.spouse_group]
       );
-      const order = Number(cnt.c) + 1;
+      const order = olderKids.length + 1;
       await addProfile(gender || 'Male', fatherId, motherId);
-      await addRel(ownerId, newId, 'Child', { spouse_group: rel[0].spouse_group, birth_order: order });
-      const [srel] = await conn.query(
-        `SELECT spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Spouse' LIMIT 1`,
-        [spouse_id, ownerId]
-      );
-      await addRel(spouse_id, newId, 'Child', { spouse_group: srel[0]?.spouse_group ?? '1', birth_order: order });
+      await addRel(ownerId, newId, 'Child', { spouse_group: chosen.spouse_group, birth_order: order });
+      const spouseSideGroup = await spouseGroupOf(spouseId, ownerId);
+      await addRel(spouseId, newId, 'Child', { spouse_group: spouseSideGroup ?? '1', birth_order: order });
       await addRel(newId, fatherId, 'Father');
       await addRel(newId, motherId, 'Mother');
+      // the new child and the earlier children of this couple are siblings
+      for (const k of olderKids) {
+        await addRel(newId, k.id, 'Sibling', { birth_order: order });
+        await addRel(k.id, newId, 'Sibling');
+      }
 
     } else if (relation_type === 'Sibling') {
       if (!owner.father_id && !owner.mother_id) return fail(400, 'Add a parent first, then add siblings');
@@ -237,8 +272,13 @@ app.post('/api/profiles/family-add', async (req, res) => {
       await addProfile(gender || 'Male', owner.father_id, owner.mother_id);
       await addRel(ownerId, newId, 'Sibling', { birth_order: order });
       await addRel(newId, ownerId, 'Sibling');
-      if (owner.father_id) { await addRel(owner.father_id, newId, 'Child'); await addRel(newId, owner.father_id, 'Father'); }
-      if (owner.mother_id) { await addRel(owner.mother_id, newId, 'Child'); await addRel(newId, owner.mother_id, 'Mother'); }
+      let fatherGroup = null, motherGroup = null;
+      if (owner.father_id && owner.mother_id) {
+        fatherGroup = await spouseGroupOf(owner.father_id, owner.mother_id);
+        motherGroup = await spouseGroupOf(owner.mother_id, owner.father_id);
+      }
+      if (owner.father_id) { await addRel(owner.father_id, newId, 'Child', { spouse_group: fatherGroup }); await addRel(newId, owner.father_id, 'Father'); }
+      if (owner.mother_id) { await addRel(owner.mother_id, newId, 'Child', { spouse_group: motherGroup }); await addRel(newId, owner.mother_id, 'Mother'); }
       const [sibs] = await conn.query(`SELECT related_profile_id AS id FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Sibling' AND related_profile_id <> ?`, [ownerId, newId]);
       for (const sb of sibs) {
         await addRel(sb.id, newId, 'Sibling');
@@ -457,8 +497,9 @@ app.post('/api/profile/:id/photo', async (req, res) => {
     const id = String(req.params.id);
     if (!SAFE_ID.test(id)) return res.status(400).json({ success: false, error: 'Invalid id' });
 
-    const [u] = await pool.query('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
-    if (u.length === 0) return res.status(404).json({ success: false, error: 'User not found' });
+    // The id can be a user (your own profile) or a family member's profile
+    const [u] = await pool.query('SELECT id FROM users WHERE id = ? UNION SELECT id FROM profiles WHERE id = ? LIMIT 1', [id, id]);
+    if (u.length === 0) return res.status(404).json({ success: false, error: 'Profile not found' });
 
     const { compressed, original } = req.body;
     const compressedBuf = jpegDataUrlToBuffer(compressed);
@@ -494,6 +535,9 @@ app.get('/api/photos/:id/:file', async (req, res) => {
   try {
     const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `${id}/profileimg/${file}` }));
     res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' });
+    // Plain <img> requests carry no Origin header, so the cors middleware adds nothing; allow reading the picture
+    // on a canvas later (re-cropping) without a stale cached copy blocking it.
+    if (!res.get('Access-Control-Allow-Origin')) res.set('Access-Control-Allow-Origin', '*');
     out.Body.pipe(res);
   } catch (e) {
     res.status(404).end();
