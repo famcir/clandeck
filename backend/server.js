@@ -112,10 +112,10 @@ app.get('/api/profiles/family-tree', async (req, res) => {
   try {
     const { user_id } = req.query;
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
-    const [myRows] = await pool.query(`SELECT * FROM profiles WHERE owner_user_id = ? OR id = ? LIMIT 1`, [user_id, user_id]);
+    const [myRows] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [user_id, user_id, user_id]);
     if (myRows.length === 0) return res.status(404).json({ success: false, error: 'Profile not found' });
     const myProfile = myRows[0]; const myProfileId = myProfile.id;
-    const [relations] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id = ? ORDER BY spouse_group ASC, birth_order ASC`, [myProfileId]);
+    const [relations] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id = ? ORDER BY CAST(spouse_group AS UNSIGNED) ASC, birth_order ASC`, [myProfileId]);
     let father = null, mother = null, siblings = [], spouses = [], children = [];
     for (let rel of relations) {
       const [pRows] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [rel.related_profile_id]);
@@ -125,7 +125,7 @@ app.get('/api/profiles/family-tree', async (req, res) => {
       else if (rel.relation_type === 'Mother') mother = profile;
       else if (rel.relation_type === 'Sibling') siblings.push(profile);
       else if (rel.relation_type === 'Spouse') { profile.spouse_group = rel.spouse_group; profile.spouse_number = rel.spouse_number; spouses.push(profile); }
-      else if (rel.relation_type === 'Child') { children.push(profile); }
+      else if (rel.relation_type === 'Child') { profile.spouse_group = rel.spouse_group; profile.birth_order = rel.birth_order; children.push(profile); }
     }
     res.json({ success: true, myProfile, family: { father, mother, siblings, spouses, children } });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -135,7 +135,7 @@ app.post('/api/profiles/auto-create', async (req, res) => {
   try {
     const { user_id, display_name, gender } = req.body;
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
-    const [exists] = await pool.query(`SELECT * FROM profiles WHERE owner_user_id = ? OR id = ? LIMIT 1`, [user_id, user_id]);
+    const [exists] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [user_id, user_id, user_id]);
     if (exists.length > 0) return res.json({ success: true, data: exists[0] });
     let name = display_name;
     if (!name) { const [u] = await pool.query(`SELECT name FROM users WHERE id = ? LIMIT 1`, [user_id]); name = u[0]?.name || 'User'; }
@@ -149,37 +149,110 @@ app.post('/api/profiles/family-add', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    let { owner_profile_id, display_name, gender, relation_type, father_id, mother_id, spouse_id, birth_order } = req.body;
-    if (!owner_profile_id || !display_name || !relation_type) {
-      await conn.rollback(); // close the open transaction before returning
-      return res.status(400).json({ success: false, error: 'required' });
+    const { owner_profile_id, display_name, gender, relation_type, spouse_id } = req.body;
+    const TYPES = ['Father', 'Mother', 'Spouse', 'Sibling', 'Child'];
+    const fail = async (status, msg) => { await conn.rollback(); return res.status(status).json({ success: false, error: msg }); };
+
+    if (!owner_profile_id || !display_name || !String(display_name).trim() || !TYPES.includes(relation_type)) {
+      return fail(400, 'Name and a valid relation are required');
     }
-    let [ownerRows] = await conn.query(`SELECT * FROM profiles WHERE id = ? OR owner_user_id = ? LIMIT 1`, [owner_profile_id, owner_profile_id]);
+    const name = String(display_name).trim();
+
+    // The person we are adding family TO (can be you, or any family member you added before)
+    const [ownerRows] = await conn.query(
+      `SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`,
+      [owner_profile_id, owner_profile_id, owner_profile_id]
+    );
     if (ownerRows.length === 0) throw new Error('Owner not found');
-    owner_profile_id = ownerRows[0].id; const owner = ownerRows[0];
-    const [uuidRow] = await conn.query(`SELECT UUID() as uuid`); const genId = uuidRow[0].uuid;
-    let newProfileId = genId;
+    const owner = ownerRows[0];
+    const ownerId = owner.id;
+
+    const [[uuidRow]] = await conn.query('SELECT UUID() AS uuid');
+    const newId = uuidRow.uuid;
+
+    const addProfile = (g, fatherId, motherId) => conn.query(
+      `INSERT INTO profiles (id, owner_user_id, display_name, gender, father_id, mother_id, show_in_deck, is_claimed, created_by_user_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`,
+      [newId, owner.owner_user_id, name, g, fatherId || null, motherId || null, owner.owner_user_id]
+    );
+    // profile_relations.id has no default value, so every row gets its own UUID()
+    const addRel = (a, b, type, o = {}) => conn.query(
+      `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, birth_order, created_at)
+       VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW())`,
+      [a, b, type, o.spouse_group ?? null, o.spouse_number ?? null, o.birth_order ?? null]
+    );
+
     if (relation_type === 'Father' || relation_type === 'Mother') {
-      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 0, NOW())`, [genId, owner.owner_user_id, display_name, gender || (relation_type === 'Father' ? 'Male' : 'Female')]);
-      if (relation_type === 'Father') await conn.query(`UPDATE profiles SET father_id = ? WHERE id = ?`, [newProfileId, owner_profile_id]);
-      else await conn.query(`UPDATE profiles SET mother_id = ? WHERE id = ?`, [newProfileId, owner_profile_id]);
-      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [owner_profile_id, newProfileId, relation_type]);
-      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, created_at) VALUES (?, ?, ?, NOW())`, [newProfileId, owner_profile_id, 'Child']);
+      const isFather = relation_type === 'Father';
+      const col = isFather ? 'father_id' : 'mother_id';
+      if (owner[col]) return fail(409, `${relation_type} is already added`);
+      await addProfile(gender || (isFather ? 'Male' : 'Female'), null, null);
+      await conn.query(`UPDATE profiles SET ${col} = ? WHERE id = ?`, [newId, ownerId]);
+      await addRel(ownerId, newId, relation_type);
+      await addRel(newId, ownerId, 'Child');
+      // existing siblings share this new parent too
+      const [sibs] = await conn.query(`SELECT related_profile_id AS id FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Sibling'`, [ownerId]);
+      for (const sb of sibs) {
+        await conn.query(`UPDATE profiles SET ${col} = ? WHERE id = ? AND ${col} IS NULL`, [newId, sb.id]);
+        await addRel(sb.id, newId, relation_type);
+        await addRel(newId, sb.id, 'Child');
+      }
+
     } else if (relation_type === 'Spouse') {
-      const [maxGroup] = await conn.query(`SELECT MAX(spouse_group) as maxg FROM profile_relations WHERE owner_profile_id = ? AND relation_type='Spouse'`, [owner_profile_id]);
-      const spouse_group = (maxGroup[0].maxg || 0) + 1;
-      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_at) VALUES (?, ?, ?, ?, 1, 0, NOW())`, [genId, owner.owner_user_id, display_name, gender]);
-      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, created_at) VALUES (?, ?, 'Spouse', ?, ?, NOW())`, [owner_profile_id, newProfileId, spouse_group, spouse_group]);
-      await conn.query(`INSERT INTO profile_relations (owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, created_at) VALUES (?, ?, 'Spouse', ?, ?, NOW())`, [newProfileId, owner_profile_id, spouse_group, spouse_group]);
-    } else {
-      await conn.query(`INSERT INTO profiles (id, owner_user_id, display_name, gender, father_id, mother_id, show_in_deck, is_claimed, birth_order, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`, [genId, owner.owner_user_id, display_name, gender, father_id || null, mother_id || null, birth_order || 1]);
+      const [[mx]] = await conn.query(`SELECT COALESCE(MAX(spouse_number), 0) AS n FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Spouse'`, [ownerId]);
+      const n = Number(mx.n) + 1;
+      await addProfile(gender || (owner.gender === 'Female' ? 'Male' : 'Female'), null, null);
+      await addRel(ownerId, newId, 'Spouse', { spouse_group: String(n), spouse_number: n });
+      await addRel(newId, ownerId, 'Spouse', { spouse_group: '1', spouse_number: 1 }); // for the new spouse, you are their first
+
+    } else if (relation_type === 'Child') {
+      if (!spouse_id) return fail(400, 'Add a spouse first, then add children');
+      const [rel] = await conn.query(
+        `SELECT spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Spouse' LIMIT 1`,
+        [ownerId, spouse_id]
+      );
+      if (rel.length === 0) return fail(400, 'Please choose one of the spouses');
+      const ownerIsFemale = owner.gender === 'Female';
+      const fatherId = ownerIsFemale ? spouse_id : ownerId;
+      const motherId = ownerIsFemale ? ownerId : spouse_id;
+      const [[cnt]] = await conn.query(
+        `SELECT COUNT(*) AS c FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Child' AND spouse_group = ?`,
+        [ownerId, rel[0].spouse_group]
+      );
+      const order = Number(cnt.c) + 1;
+      await addProfile(gender || 'Male', fatherId, motherId);
+      await addRel(ownerId, newId, 'Child', { spouse_group: rel[0].spouse_group, birth_order: order });
+      const [srel] = await conn.query(
+        `SELECT spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = 'Spouse' LIMIT 1`,
+        [spouse_id, ownerId]
+      );
+      await addRel(spouse_id, newId, 'Child', { spouse_group: srel[0]?.spouse_group ?? '1', birth_order: order });
+      await addRel(newId, fatherId, 'Father');
+      await addRel(newId, motherId, 'Mother');
+
+    } else if (relation_type === 'Sibling') {
+      if (!owner.father_id && !owner.mother_id) return fail(400, 'Add a parent first, then add siblings');
+      const [[cnt]] = await conn.query(`SELECT COUNT(*) AS c FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Sibling'`, [ownerId]);
+      const order = Number(cnt.c) + 1;
+      await addProfile(gender || 'Male', owner.father_id, owner.mother_id);
+      await addRel(ownerId, newId, 'Sibling', { birth_order: order });
+      await addRel(newId, ownerId, 'Sibling');
+      if (owner.father_id) { await addRel(owner.father_id, newId, 'Child'); await addRel(newId, owner.father_id, 'Father'); }
+      if (owner.mother_id) { await addRel(owner.mother_id, newId, 'Child'); await addRel(newId, owner.mother_id, 'Mother'); }
+      const [sibs] = await conn.query(`SELECT related_profile_id AS id FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Sibling' AND related_profile_id <> ?`, [ownerId, newId]);
+      for (const sb of sibs) {
+        await addRel(sb.id, newId, 'Sibling');
+        await addRel(newId, sb.id, 'Sibling');
+      }
     }
+
     await conn.commit();
-    const [newProfileRows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [newProfileId]);
+    const [newProfileRows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [newId]);
     res.json({ success: true, data: newProfileRows[0] });
   } catch (e) {
-    await conn.rollback();
-    res.status(500).json({ success: false, error: e.message });
+    try { await conn.rollback(); } catch {}
+    console.error('family-add error:', e);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
   } finally { conn.release(); }
 });
 
@@ -292,9 +365,10 @@ app.get('/api/profile/:id', async (req, res) => {
       `SELECT p.*, u.email as user_email, u.mobile as user_mobile, u.name as user_name, u.photo_url as user_photo 
        FROM profiles p 
        LEFT JOIN users u ON u.id = p.id 
-       WHERE p.id = ? OR p.owner_user_id = ? 
+       WHERE p.id = ? OR (p.owner_user_id = ? AND p.is_claimed = 1)
+       ORDER BY (p.id = ?) DESC
        LIMIT 1`,
-      [id, id]
+      [id, id, id]
     );
     if (rows.length === 0) return res.status(404).json({ success: false, error: 'Profile not found' });
     res.json({ success: true, data: rows[0] });
