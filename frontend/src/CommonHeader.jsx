@@ -5,8 +5,12 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const user = self || JSON.parse(localStorage.getItem('user') || '{}');
+  let user = self;
+  if (!user) { try { user = JSON.parse(localStorage.getItem('user') || '{}'); } catch { user = {}; } }   // a broken saved value must not crash the page
   const initial = (user?.name || user?.display_name || 'S')[0]?.toUpperCase();
+  let savedPhoto = '';
+  try { const ph = localStorage.getItem('photo_url') || ''; savedPhoto = ph.startsWith('blob:') ? '' : ph; } catch { /* ignore */ }
+  const [photoOk, setPhotoOk] = useState(true);
 
   // FIXED NAVIGATION - always works even if props missing
   const goToDeck = () => {
@@ -23,10 +27,11 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
 
   const handleLogout = () => {
     setOpen(false);
+    // wipe everything cached for this person, so the next login on this computer never sees their photo / name / family
+    ['user', 'token', 'photo_url', 'clandeck_photo_pos', 'profile_nickname', 'profile_visibility', 'profile_name',
+     'clandeck_family', 'clandeck_groups', 'clandeck_privacy', 'admin_key'].forEach((k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
     if (onLogout) return onLogout();
     // Fallback logout
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
     window.location.hash = '#/login';
     window.location.reload();
   };
@@ -97,18 +102,21 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
             <input 
               className="search-input"
               type="text" 
-              placeholder=" Find your FamilyMember, Friends, Your Clan " 
+              placeholder="Find your FamilyMember, Friends, Your Clan"
+              aria-label="Search" 
               value={query}
               onChange={(e)=>{ setQuery(e.target.value); onSearch && onSearch(e.target.value); }}
             />
-            <button className="search-icon-btn" onClick={()=>setSearchOpen(!searchOpen)}>🔍</button>
+            <button className="search-icon-btn" aria-label="Search" onClick={()=>setSearchOpen(!searchOpen)}>🔍</button>
           </div>
         </div>
 
         <div style={{display:'flex', alignItems:'center', gap:'8px', flexShrink:0}}>
-          <div style={{width:'32px', height:'32px', background:'#f8f5f0', border:'1px solid #e9e2d6', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:'12px'}}>{initial}</div>
+          <div title={user?.name || ''} style={{width:'32px', height:'32px', background:'#f8f5f0', border:'1px solid #e9e2d6', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:'12px', overflow:'hidden'}}>
+            {savedPhoto && photoOk ? <img src={savedPhoto} alt="" onError={()=>setPhotoOk(false)} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : initial}
+          </div>
           <button onClick={handleLogout} style={{padding:'7px 12px', background:'#fff5f5', border:'1px solid #ffd1d1', borderRadius:'20px', fontSize:'11px', fontWeight:700, color:'#d33', cursor:'pointer'}}>Logout</button>
-          <button className="hamburger" onClick={()=>setOpen(!open)}>{open ? '✕' : '☰'}</button>
+          <button className="hamburger" aria-label="Menu" aria-expanded={open} onClick={()=>setOpen(!open)}>{open ? '✕' : '☰'}</button>
         </div>
       </div>
 
