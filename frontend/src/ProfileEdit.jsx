@@ -9,14 +9,14 @@ const EMPTY_FAMILY = { father: null, mother: null, siblings: [], spouses: [], ch
 
 // ---------- shared styles ----------
 const inputStyle = { width: '100%', padding: '12px 16px', borderRadius: '20px', border: 'none', background: '#f0ede8', fontSize: '13px', boxSizing: 'border-box', outline: 'none' };
-const labelStyle = { fontSize: '9px', fontWeight: 800, color: '#8a7a65', letterSpacing: '0.5px', marginBottom: '6px', display: 'block' };
+const labelStyle = { fontSize: '9px', fontWeight: 600, color: '#8a7a65', letterSpacing: '0.5px', marginBottom: '6px', display: 'block' };
 const cardStyle = { background: 'white', borderRadius: '14px', padding: '16px' };
 const pillBtn = (dark, disabled) => ({
   background: dark ? '#111' : 'white', color: dark ? 'white' : '#111', border: dark ? 'none' : '1px solid #e9e2d6',
-  padding: '10px', borderRadius: '20px', fontWeight: 700, fontSize: '11px',
+  padding: '10px', borderRadius: '20px', fontWeight: 500, fontSize: '11px',
   cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1
 });
-const smallBtn = { background: 'white', border: '1px solid #e9e2d6', padding: '5px 12px', borderRadius: '14px', fontWeight: 700, fontSize: '10px', cursor: 'pointer' };
+const smallBtn = { background: 'white', border: '1px solid #e9e2d6', padding: '5px 12px', borderRadius: '14px', fontWeight: 500, fontSize: '10px', cursor: 'pointer' };
 
 // ---------- small helpers ----------
 const fetchJSON = async (path, options) => {
@@ -232,14 +232,14 @@ function PersonEditor({ profile, isSelf, storedUser, onSaved, onCancel }) {
           ) : <div style={{ lineHeight: '160px', fontSize: '50px' }}>👤</div>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '12px' }}>
-          <button type="button" onClick={() => changeZoom((z) => Math.max(1, z - 0.1))} style={{ width: '30px', height: '30px', borderRadius: '50%', border: '1px solid #ddd', background: 'white', fontWeight: 800 }}>-</button>
+          <button type="button" onClick={() => changeZoom((z) => Math.max(1, z - 0.1))} style={{ width: '30px', height: '30px', borderRadius: '50%', border: '1px solid #ddd', background: 'white', fontWeight: 600 }}>-</button>
           <span style={{ fontSize: '10px', color: '#888' }}>Drag to move • +/- zoom</span>
-          <button type="button" onClick={() => changeZoom((z) => Math.min(3, z + 0.1))} style={{ width: '30px', height: '30px', borderRadius: '50%', border: '1px solid #ddd', background: 'white', fontWeight: 800 }}>+</button>
+          <button type="button" onClick={() => changeZoom((z) => Math.min(3, z + 0.1))} style={{ width: '30px', height: '30px', borderRadius: '50%', border: '1px solid #ddd', background: 'white', fontWeight: 600 }}>+</button>
         </div>
-        <label style={{ display: 'inline-block', marginTop: '14px', background: '#111', color: 'white', padding: '8px 18px', borderRadius: '20px', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}>
+        <label style={{ display: 'inline-block', marginTop: '14px', background: '#111', color: 'white', padding: '8px 18px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
           Choose File <input type="file" accept="image/*" onChange={handleImage} style={{ display: 'none' }} />
         </label>
-        <div style={{ fontWeight: 800, fontSize: '16px', marginTop: '12px' }}>{form.display_name || 'Name'} {form.nickname && `(${form.nickname})`}</div>
+        <div style={{ fontWeight: 600, fontSize: '16px', marginTop: '12px' }}>{form.display_name || 'Name'} {form.nickname && `(${form.nickname})`}</div>
         <div style={{ fontSize: '10px', color: '#999', marginTop: '4px' }}>
           {photoDirty ? 'Photo changed - press Save to upload' : (photoOriginal ? 'Photo saved ✓' : 'No photo yet')}
         </div>
@@ -247,7 +247,7 @@ function PersonEditor({ profile, isSelf, storedUser, onSaved, onCancel }) {
 
       {/* DETAILS */}
       <div style={{ ...cardStyle, marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '14px' }}>Personal Details</h3>
+        <h3 style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>Personal Details</h3>
         <div><label style={labelStyle}>FULL NAME</label><input value={form.display_name} onChange={(e) => handleChange('display_name', e.target.value)} style={inputStyle} /></div>
         <div><label style={labelStyle}>NICK NAME</label><input value={form.nickname} onChange={(e) => handleChange('nickname', e.target.value)} style={inputStyle} /></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -269,15 +269,15 @@ function PersonEditor({ profile, isSelf, storedUser, onSaved, onCancel }) {
         <div style={{ background: '#faf7f2', borderRadius: '12px', padding: '14px', border: '1px solid #e9e2d6' }}>
           <label style={labelStyle}>PUBLIC VIEW</label>
           <div style={{ display: 'flex', gap: '20px', marginTop: '8px' }}>
-            <label style={{ display: 'flex', gap: '6px', fontSize: '12px', fontWeight: 700 }}><input type="radio" checked={form.visibility === 'Public'} onChange={() => handleChange('visibility', 'Public')} /> Public</label>
-            <label style={{ display: 'flex', gap: '6px', fontSize: '12px', fontWeight: 700 }}><input type="radio" checked={form.visibility === 'Private'} onChange={() => handleChange('visibility', 'Private')} /> Private</label>
+            <label style={{ display: 'flex', gap: '6px', fontSize: '12px', fontWeight: 500 }}><input type="radio" checked={form.visibility === 'Public'} onChange={() => handleChange('visibility', 'Public')} /> Public</label>
+            <label style={{ display: 'flex', gap: '6px', fontSize: '12px', fontWeight: 500 }}><input type="radio" checked={form.visibility === 'Private'} onChange={() => handleChange('visibility', 'Private')} /> Private</label>
           </div>
           <div style={{ marginTop: '12px' }}><label style={labelStyle}>SHOW IN DECK</label>
             <select value={form.show_in_deck} onChange={(e) => handleChange('show_in_deck', Number(e.target.value))} style={inputStyle}><option value={1}>Yes</option><option value={0}>No</option></select></div>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
-          {onCancel && <button type="button" onClick={onCancel} style={{ flex: 1, padding: '14px', borderRadius: '30px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>}
-          <button type="button" onClick={handleSave} disabled={saving} style={{ flex: 2, background: '#111', color: 'white', padding: '14px', borderRadius: '30px', fontWeight: 800, border: 'none', cursor: 'pointer' }}>
+          {onCancel && <button type="button" onClick={onCancel} style={{ flex: 1, padding: '14px', borderRadius: '30px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>}
+          <button type="button" onClick={handleSave} disabled={saving} style={{ flex: 2, background: '#111', color: 'white', padding: '14px', borderRadius: '30px', fontWeight: 600, border: 'none', cursor: 'pointer' }}>
             {saving ? 'Saving...' : (isSelf ? 'Save Personal →' : 'Save Details →')}
           </button>
         </div>
@@ -298,7 +298,7 @@ function PersonCard({ p, relation, onEdit, onOpen, onInvite }) {
         {img ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '👤'}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 800, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {p.display_name}{p.nickname ? ` (${p.nickname})` : ''}
         </div>
         <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '2px' }}>{bits.join(' • ')}</div>
@@ -571,7 +571,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
         {/* RIGHT - FAMILY */}
         <div>
           <div style={cardStyle}>
-            <h3 style={{ margin: 0, fontWeight: 800, fontSize: '14px' }}>Family Members & Groups</h3>
+            <h3 style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>Family Members & Groups</h3>
 
             {/* breadcrumb */}
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '11px' }}>
@@ -653,7 +653,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       {/* ADD POP-UP */}
       {showAdd && (
         <Modal onClose={() => setShowAdd(null)}>
-          <h3 style={{ fontWeight: 800, margin: 0 }}>Add {showAdd.type}</h3>
+          <h3 style={{ fontWeight: 600, margin: 0 }}>Add {showAdd.type}</h3>
           <div style={{ fontSize: '11px', color: '#8a7a65', marginTop: '4px' }}>for {focus.profile.display_name}</div>
           {picked ? (
             <div style={{ marginTop: '14px', padding: '10px 12px', borderRadius: '10px', background: '#f1f8f1', border: '1px solid #cfe5cf', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -669,18 +669,18 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           )}
           {!picked && matches.length > 0 && (
             <div style={{ marginTop: '10px', border: '1px solid #e9e2d6', borderRadius: '10px', overflow: 'hidden' }}>
-              <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#8a7a65', background: '#faf7f2' }}>ALREADY ON CLANDECK - TAP TO LINK</div>
+              <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 600, color: '#8a7a65', background: '#faf7f2' }}>ALREADY ON CLANDECK - TAP TO LINK</div>
               {matches.map((m) => (
                 <button key={m.id} type="button" onClick={() => { setPicked(m); setMatches([]); }}
                   style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '8px 10px', border: 'none', borderTop: '1px solid #f0e9dc', background: 'white', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 8, background: '#e9d8b6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, overflow: 'hidden', flexShrink: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: '#e9d8b6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, overflow: 'hidden', flexShrink: 0 }}>
                     {m.photo ? <img src={m.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} /> : (m.display_name || '?')[0].toUpperCase()}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '13px', fontWeight: 700 }}>{m.display_name}{m.nickname ? ` (${m.nickname})` : ''}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 500 }}>{m.display_name}{m.nickname ? ` (${m.nickname})` : ''}</div>
                     <div style={{ fontSize: '10px', color: '#8a7a65' }}>{[m.gender, m.location].filter(Boolean).join(' • ')}</div>
                   </div>
-                  <span style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: 10, background: m.is_claimed ? '#e8f3e8' : '#fff3df', color: m.is_claimed ? '#2f6b2f' : '#8a5a10' }}>{m.is_claimed ? 'HAS ACCOUNT' : 'ADDED BY YOU'}</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, padding: '3px 8px', borderRadius: 10, background: m.is_claimed ? '#e8f3e8' : '#fff3df', color: m.is_claimed ? '#2f6b2f' : '#8a5a10' }}>{m.is_claimed ? 'HAS ACCOUNT' : 'ADDED BY YOU'}</span>
                 </button>
               ))}
               <div style={{ padding: '7px 10px', fontSize: '10px', color: '#8a7a65', borderTop: '1px solid #f0e9dc' }}>Not in the list? Just press Add and a new person is created.</div>
@@ -706,8 +706,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           )}
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-            <button type="button" onClick={() => setShowAdd(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-            <button type="button" onClick={handleAdd} disabled={busy} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Adding...' : picked ? 'Link' : 'Add'}</button>
+            <button type="button" onClick={() => setShowAdd(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+            <button type="button" onClick={handleAdd} disabled={busy} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Adding...' : picked ? 'Link' : 'Add'}</button>
           </div>
         </Modal>
       )}
@@ -715,11 +715,11 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       {/* EDIT POP-UP FOR ANY FAMILY MEMBER */}
       {editing && (
         <Modal onClose={() => setEditing(null)} maxWidth={520}>
-          <h3 style={{ fontWeight: 800, margin: '0 0 12px' }}>Edit {editing.display_name}</h3>
+          <h3 style={{ fontWeight: 600, margin: '0 0 12px' }}>Edit {editing.display_name}</h3>
           <PersonEditor key={editing.id} profile={editing} isSelf={false} storedUser={storedUser} onSaved={onMemberSaved} onCancel={() => setEditing(null)} />
           <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #f0e9dc', textAlign: 'center' }}>
             <button type="button" disabled={busy} onClick={() => startRemove(editing)}
-              style={{ padding: '10px 18px', borderRadius: '20px', border: '1px solid #ffd1d1', background: '#fff5f5', color: '#d33', fontWeight: 800, fontSize: '12px', cursor: 'pointer' }}>
+              style={{ padding: '10px 18px', borderRadius: '20px', border: '1px solid #ffd1d1', background: '#fff5f5', color: '#d33', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
               {busy ? 'Checking...' : '🗑 Remove from family'}
             </button>
           </div>
@@ -729,7 +729,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       {/* INVITE POP-UP: temporary login + WhatsApp / SMS */}
       {invite && (
         <Modal onClose={() => !busy && setInvite(null)} maxWidth={440}>
-          <h3 style={{ fontWeight: 800, margin: 0 }}>Invite {invite.person.display_name}</h3>
+          <h3 style={{ fontWeight: 600, margin: 0 }}>Invite {invite.person.display_name}</h3>
           {!invite.result ? (
             <>
               <p style={{ fontSize: '13px', color: '#555', lineHeight: 1.5 }}>This makes a <b>temporary username and password</b> for {invite.person.display_name}, valid for 7 days. They log in, see their own family tree, and add their own family members.</p>
@@ -737,23 +737,23 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
               <input value={invite.mobile} onChange={(e) => setInvite((i) => ({ ...i, mobile: e.target.value }))} placeholder="e.g. 9876543210" inputMode="tel" style={inputStyle} />
               <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '4px' }}>A 10-digit number gets the India code (91). For other countries type the full number with the country code.</div>
               <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                <button type="button" onClick={() => setInvite(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-                <button type="button" disabled={busy} onClick={createInvite} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Creating...' : 'Create temporary login'}</button>
+                <button type="button" onClick={() => setInvite(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+                <button type="button" disabled={busy} onClick={createInvite} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Creating...' : 'Create temporary login'}</button>
               </div>
             </>
           ) : (
             <>
               <div style={{ margin: '12px 0', padding: '12px', background: 'white', border: '1px solid #e9e2d6', borderRadius: '12px', fontSize: '13px', lineHeight: 1.7 }}>
-                <div><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 700 }}>USERNAME</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.username}</b></div>
-                <div style={{ marginTop: '6px' }}><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 700 }}>PASSWORD</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.password}</b></div>
+                <div><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 500 }}>USERNAME</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.username}</b></div>
+                <div style={{ marginTop: '6px' }}><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 500 }}>PASSWORD</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.password}</b></div>
               </div>
               <div style={{ fontSize: '11px', color: '#8a5a10', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: '10px', padding: '8px 10px' }}>⚠️ The password is shown only now. Share it right away. If it is lost, press Invite again to make a new one.</div>
               <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
-                <button type="button" onClick={shareWhatsApp} style={{ flex: 1, minWidth: 120, padding: '11px', borderRadius: '20px', border: 'none', background: '#25d366', color: 'white', fontWeight: 800, cursor: 'pointer' }}>WhatsApp</button>
-                <button type="button" onClick={shareSms} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: 'none', background: '#1a73e8', color: 'white', fontWeight: 800, cursor: 'pointer' }}>SMS</button>
-                <button type="button" onClick={copyInvite} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 800, cursor: 'pointer' }}>Copy</button>
+                <button type="button" onClick={shareWhatsApp} style={{ flex: 1, minWidth: 120, padding: '11px', borderRadius: '20px', border: 'none', background: '#25d366', color: 'white', fontWeight: 600, cursor: 'pointer' }}>WhatsApp</button>
+                <button type="button" onClick={shareSms} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: 'none', background: '#1a73e8', color: 'white', fontWeight: 600, cursor: 'pointer' }}>SMS</button>
+                <button type="button" onClick={copyInvite} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 600, cursor: 'pointer' }}>Copy</button>
               </div>
-              <button type="button" onClick={() => setInvite(null)} style={{ width: '100%', marginTop: '10px', padding: '10px', borderRadius: '20px', border: 'none', background: 'transparent', color: '#8a7a65', fontWeight: 700, cursor: 'pointer' }}>Done</button>
+              <button type="button" onClick={() => setInvite(null)} style={{ width: '100%', marginTop: '10px', padding: '10px', borderRadius: '20px', border: 'none', background: 'transparent', color: '#8a7a65', fontWeight: 500, cursor: 'pointer' }}>Done</button>
             </>
           )}
         </Modal>
@@ -762,7 +762,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       {/* SET YOUR OWN LOGIN (for people who came in with a temporary one) */}
       {credsOpen && (
         <Modal onClose={() => !busy && setCredsOpen(false)} maxWidth={400}>
-          <h3 style={{ fontWeight: 800, margin: 0 }}>Set your own login</h3>
+          <h3 style={{ fontWeight: 600, margin: 0 }}>Set your own login</h3>
           <label style={{ ...labelStyle, marginTop: '14px', display: 'block' }}>TEMPORARY PASSWORD (CURRENT)</label>
           <input type="password" value={creds.current} onChange={(e) => setCreds((c) => ({ ...c, current: e.target.value }))} style={inputStyle} autoComplete="current-password" />
           <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW USERNAME</label>
@@ -772,8 +772,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>REPEAT NEW PASSWORD</label>
           <input type="password" value={creds.pass2} onChange={(e) => setCreds((c) => ({ ...c, pass2: e.target.value }))} style={inputStyle} autoComplete="new-password" />
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-            <button type="button" onClick={() => setCredsOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Later</button>
-            <button type="button" disabled={busy} onClick={saveCreds} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Saving...' : 'Save'}</button>
+            <button type="button" onClick={() => setCredsOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Later</button>
+            <button type="button" disabled={busy} onClick={saveCreds} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Saving...' : 'Save'}</button>
           </div>
         </Modal>
       )}
@@ -781,7 +781,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       {/* CONFIRM REMOVE: shows exactly what will happen first */}
       {removePlan && (
         <Modal onClose={() => !busy && setRemovePlan(null)} maxWidth={420}>
-          <h3 style={{ fontWeight: 800, margin: 0 }}>{removePlan.action === 'unlink' ? 'Remove link with' : 'Delete'} {removePlan.person.name}?</h3>
+          <h3 style={{ fontWeight: 600, margin: 0 }}>{removePlan.action === 'unlink' ? 'Remove link with' : 'Delete'} {removePlan.person.name}?</h3>
           {removePlan.action === 'unlink' ? (
             <p style={{ fontSize: '13px', color: '#555', lineHeight: 1.5 }}>{removePlan.person.name} has their own ClanDeck account, so only the link to this family is removed. Their account and their own family stay safe.</p>
           ) : (
@@ -798,8 +798,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
             </div>
           )}
           <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-            <button type="button" disabled={busy} onClick={() => setRemovePlan(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-            <button type="button" disabled={busy} onClick={confirmRemove} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: '#d33', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Removing...' : removePlan.action === 'unlink' ? 'Remove link' : 'Yes, delete'}</button>
+            <button type="button" disabled={busy} onClick={() => setRemovePlan(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+            <button type="button" disabled={busy} onClick={confirmRemove} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: '#d33', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Removing...' : removePlan.action === 'unlink' ? 'Remove link' : 'Yes, delete'}</button>
           </div>
         </Modal>
       )}

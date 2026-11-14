@@ -207,7 +207,7 @@ function Person({ node, D, isLogin, onPick }) {
         style={{
           position: 'relative', zIndex: hover ? 5 : 0,
           width: D.IMG, height: D.IMG, borderRadius: 12, overflow: 'hidden', background: '#e8d5b0', flexShrink: 0, boxSizing: 'border-box',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: D.IMG * 0.4, color: '#5a4524',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: D.IMG * 0.4, color: '#5a4524',
           border: center ? '3px solid #1a1a1a' : '2px solid #fff',
           boxShadow: hover ? '0 10px 24px rgba(0,0,0,.35)' : center ? '0 4px 12px rgba(0,0,0,.22)' : '0 1px 4px rgba(0,0,0,.18)',
           transform: hover ? 'scale(1.75)' : 'none', transformOrigin: 'center', transition: 'transform .18s ease, box-shadow .18s ease',
@@ -216,10 +216,10 @@ function Person({ node, D, isLogin, onPick }) {
         {src && imgOk ? <img src={src} alt="" onError={() => setImgOk(false)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initialOf(p)}
       </div>
       {/* the white background lets a line pass behind the text instead of through it */}
-      <div style={{ position: 'relative', zIndex: 1, background: 'white', width: '100%', marginTop: 6, fontWeight: 800, fontSize: 12, lineHeight: '15px', maxHeight: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', color: '#1a1a1a' }}>
+      <div style={{ position: 'relative', zIndex: 1, background: 'white', width: '100%', marginTop: 6, fontWeight: 600, fontSize: 12, lineHeight: '15px', maxHeight: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', color: '#1a1a1a' }}>
         {p.display_name}
       </div>
-      <div style={{ position: 'relative', zIndex: 1, background: 'white', width: '100%', fontWeight: 800, fontSize: 11, lineHeight: '14px', color: center ? '#1a1a1a' : '#8a7a5c' }}>{label}</div>
+      <div style={{ position: 'relative', zIndex: 1, background: 'white', width: '100%', fontWeight: 600, fontSize: 11, lineHeight: '14px', color: center ? '#1a1a1a' : '#8a7a5c' }}>{label}</div>
     </button>
   );
 }
@@ -243,12 +243,12 @@ function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
         boxShadow: isLast ? '0 4px 12px rgba(0,0,0,.18)' : '0 1px 4px rgba(0,0,0,.08)',
       }}
     >
-      <div style={{ width: D.TIMG, height: D.TIMG, borderRadius: 8, overflow: 'hidden', background: '#e8d5b0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13, color: '#5a4524', flexShrink: 0 }}>
+      <div style={{ width: D.TIMG, height: D.TIMG, borderRadius: 8, overflow: 'hidden', background: '#e8d5b0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: 13, color: '#5a4524', flexShrink: 0 }}>
         {src && imgOk ? <img src={src} alt="" onError={() => setImgOk(false)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initialOf(p)}
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p ? p.display_name : '…'}</div>
-        <div style={{ fontSize: 11, fontWeight: 800, color: '#8a7a5c', lineHeight: '13px' }}>{sub}{isLogin && index !== 0 ? ' • You' : ''}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p ? p.display_name : '…'}</div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#8a7a5c', lineHeight: '13px' }}>{sub}{isLogin && index !== 0 ? ' • You' : ''}</div>
       </div>
     </button>
   );
@@ -340,13 +340,13 @@ function FamilyTree({ userId, onFocus }) {
         <button type="button" onClick={() => chooseView('line')} style={navBtn(lineMode)}>➖ Line view</button>
         <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={back}>← Back</button>
         <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={goHome}>⌂ My tree</button>
-        <span style={{ fontSize: 12, fontWeight: 800, color: '#8a7a5c' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#8a7a5c' }}>
           {data ? <>Showing <span style={{ color: '#1a1a1a' }}>{data.myProfile.display_name}</span>{atHome ? '' : "'s family"} · tap anyone to open their tree</> : ''}
         </span>
       </div>
 
-      {error && <div style={{ padding: 16, color: '#b00020', fontWeight: 800, fontSize: 12 }}>{error}</div>}
-      {loading && !data && <div style={{ padding: 24, color: '#8a7a5c', fontWeight: 800, fontSize: 12 }}>Loading family tree…</div>}
+      {error && <div style={{ padding: 16, color: '#b00020', fontWeight: 600, fontSize: 12 }}>{error}</div>}
+      {loading && !data && <div style={{ padding: 24, color: '#8a7a5c', fontWeight: 600, fontSize: 12 }}>Loading family tree…</div>}
 
       {layout && (
         <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'hidden', opacity: loading ? 0.5 : 1, transition: 'opacity .15s' }}>
@@ -372,7 +372,7 @@ function FamilyTree({ userId, onFocus }) {
                   const i = k + 1;
                   const mx = (cxOf(i - 1) + D.TW / 2 + cxOf(i) - D.TW / 2) / 2;
                   return (
-                    <span key={'l' + i} style={{ position: 'absolute', left: mx - 36, width: 72, top: chipY - 20, textAlign: 'center', fontSize: 11, fontWeight: 800, color: '#8a7a5c' }}>
+                    <span key={'l' + i} style={{ position: 'absolute', left: mx - 36, width: 72, top: chipY - 20, textAlign: 'center', fontSize: 11, fontWeight: 600, color: '#8a7a5c' }}>
                       {item.rel}
                     </span>
                   );
@@ -443,8 +443,8 @@ function AdSlot({ kind, style }) {
         <ins className="adsbygoogle" style={{ display: 'block', width: '100%', height: '100%' }} data-ad-client={ADS.client} data-ad-slot={slotId} data-ad-format={isBanner ? 'horizontal' : 'rectangle'} data-full-width-responsive={isBanner ? 'true' : 'false'} />
       ) : (
         <>
-          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: '#b8a98a' }}>ADVERTISEMENT</span>
-          <span style={{ fontSize: 11, fontWeight: 800, color: '#c9bb9d', marginTop: 2 }}>{isBanner ? 'Banner ad space' : 'Square ad space'}</span>
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 2, color: '#b8a98a' }}>ADVERTISEMENT</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#c9bb9d', marginTop: 2 }}>{isBanner ? 'Banner ad space' : 'Square ad space'}</span>
         </>
       )}
     </div>
@@ -568,33 +568,33 @@ export default function Deck({ onGoProfile, onLogout }) {
       {tempLogin && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
           <span style={{flex:1, minWidth:200}}>🔑 You are using a <b>temporary login</b>. Please set your own username and password in Profile Edit.</span>
-          <button onClick={onGoProfile} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight:700, fontSize:'11px', cursor:'pointer'}}>Set now</button>
+          <button onClick={onGoProfile} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight: 500, fontSize:'11px', cursor:'pointer'}}>Set now</button>
         </div>
       )}
 
       <div className="deck-grid">
         <div>
           <div className="card" style={{textAlign:'center'}}>
-            <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight:800, overflow:'hidden'}}>
+            <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
               {photoUrl ? <img src={photoUrl} alt="profile" style={{width:'100%', height:'100%', objectFit:'cover', objectPosition: `${pos.x}% ${pos.y}%`, transform: `scale(${pos.zoom/100})`}} onError={()=>setPhotoUrl('')} /> : getName()[0]?.toUpperCase()}
             </div>
-            <h2 style={{fontWeight:800, fontSize:'16px', marginTop:'12px'}}>
+            <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px'}}>
               {isPublic ? getName() : 'Hidden'}
               {isPublic && profileInfo.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({profileInfo.nickname})</span>}
             </h2>
-            {privacy.showUsername!==false && <p style={{fontSize:'11px', color:'#888', fontWeight:700}}>@{storedUser?.uname || 'user'}{isPublic && profileInfo.nickname ? ` • ${profileInfo.nickname}` : ''}</p>}
+            {privacy.showUsername!==false && <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>@{storedUser?.uname || 'user'}{isPublic && profileInfo.nickname ? ` • ${profileInfo.nickname}` : ''}</p>}
 
             <div style={{marginTop:'14px', textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight:700}}>USER ID</span><span style={{fontWeight:700, fontSize:'10px'}}>{(storedUser?.id || 'self').slice(0,22)}</span></div>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight:700}}>NAME</span><span style={{fontWeight:700}}>{isPublic ? getName() : 'Hidden'}</span></div>
-              {profileInfo.nickname && <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight:700}}>NICK NAME</span><span style={{fontWeight:700}}>{isPublic ? profileInfo.nickname : 'Hidden'}</span></div>}
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight:700}}>VISIBILITY</span><span style={{fontWeight:700, color: profileInfo.visibility==='public' ? 'green' : 'red'}}>{profileInfo.visibility?.toUpperCase()}</span></div>
+              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>USER ID</span><span style={{fontWeight: 500, fontSize:'10px'}}>{(storedUser?.id || 'self').slice(0,22)}</span></div>
+              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>NAME</span><span style={{fontWeight: 500}}>{isPublic ? getName() : 'Hidden'}</span></div>
+              {profileInfo.nickname && <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>NICK NAME</span><span style={{fontWeight: 500}}>{isPublic ? profileInfo.nickname : 'Hidden'}</span></div>}
+              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>VISIBILITY</span><span style={{fontWeight: 500, color: profileInfo.visibility==='public' ? 'green' : 'red'}}>{profileInfo.visibility?.toUpperCase()}</span></div>
             </div>
 
             {privacy.showMangoes!==false && (
               <>
                 <div style={{marginTop:'14px'}}><img src={mangoBasket} alt="basket" style={{width:'54px', height:'54px', margin:'0 auto', display:'block'}} /></div>
-                <p style={{fontSize:'8px', letterSpacing:'2px', color:'#aaa', fontWeight:800, marginTop:'4px'}}>MANGOS IN BASKET</p>
+                <p style={{fontSize:'8px', letterSpacing:'2px', color:'#aaa', fontWeight: 600, marginTop:'4px'}}>MANGOS IN BASKET</p>
               </>
             )}
           </div>
@@ -605,8 +605,8 @@ export default function Deck({ onGoProfile, onLogout }) {
           {privacy.showFamilyTree!==false ? (
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                <span style={{fontWeight:800, fontSize:'13px'}}>{isPublic ? getName().split(' ')[0] : 'Hidden'}'s Family Tree {isPublic && profileInfo.nickname ? `(${profileInfo.nickname})` : ''}</span>
-                <span style={{fontSize:'10px', background:'white', padding:'4px 10px', borderRadius:'20px', fontWeight:700, border:'1px solid #e9e2d6'}}>{visibleFamily.length + 1} Members • {profileInfo.visibility}</span>
+                <span style={{fontWeight: 600, fontSize:'13px'}}>{isPublic ? getName().split(' ')[0] : 'Hidden'}'s Family Tree {isPublic && profileInfo.nickname ? `(${profileInfo.nickname})` : ''}</span>
+                <span style={{fontSize:'10px', background:'white', padding:'4px 10px', borderRadius:'20px', fontWeight: 500, border:'1px solid #e9e2d6'}}>{visibleFamily.length + 1} Members • {profileInfo.visibility}</span>
               </div>
               <FamilyTree userId={storedUser?.id || storedUser?.uname} />
             </div>
@@ -615,7 +615,7 @@ export default function Deck({ onGoProfile, onLogout }) {
 
         <div>
           <div className="card">
-            <h3 style={{fontWeight:800, fontSize:'12px', marginBottom:'10px'}}>My Groups ({groups.length})</h3>
+            <h3 style={{fontWeight: 600, fontSize:'12px', marginBottom:'10px'}}>My Groups ({groups.length})</h3>
             {groups.length===0 ? <p style={{fontSize:'11px', color:'#aaa'}}>No groups yet. Create in Profile Edit.</p> : groups.map(g=>(
               g && <div key={g.id} style={{padding:'8px', border:'1px solid #f0e0c0', borderRadius:'8px', marginBottom:'6px', fontSize:'12px'}}><strong>{g.name}</strong><br/><span style={{color:'#888'}}>{g.members?.length || 0} members</span></div>
             ))}
