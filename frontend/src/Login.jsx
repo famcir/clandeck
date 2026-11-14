@@ -47,6 +47,7 @@ export default function Login({ onLoginSuccess, onGoConstruction }) {
 
   return (
     <div className="login-wrapper">
+      <style>{`.login-wrapper, .login-wrapper * { font-family: Arial, Helvetica, sans-serif; }`}</style>
       {/* FULL PAGE LOADER WHEN LOGGING IN */}
       {loginLoading && (
         <div className="welcome-overlay">

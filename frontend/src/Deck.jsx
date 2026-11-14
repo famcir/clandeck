@@ -554,8 +554,9 @@ export default function Deck({ onGoProfile, onLogout }) {
   const isPublic = profileInfo.visibility === 'public' && privacy.showName !== false;
 
   return (
-    <div style={{minHeight:'100vh', background:'#f7f4ef', width:'100vw'}}>
+    <div className="pg-font" style={{minHeight:'100vh', background:'#f7f4ef', width:'100vw'}}>
       <style>{`
+        .pg-font :not(header):not(header *) { font-family: Arial, Helvetica, sans-serif; }
         .deck-grid { display: grid; grid-template-columns: 300px 1fr 300px; gap: 16px; width: 100%; padding: 16px 20px; box-sizing: border-box; }
         .card { background: #fffefb; border: 1px solid #e9e2d6; border-radius: 14px; padding: 18px; }
         @media(max-width: 1100px){ .deck-grid { grid-template-columns: 300px 1fr; } }

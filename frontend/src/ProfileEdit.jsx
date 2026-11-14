@@ -551,7 +551,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const otherKids = fam.children.filter((c) => !spouseGroups.has(String(c.spouse_group)));
 
   return (
-    <div style={{ minHeight: '100vh', width: '100%', background: '#f7f4ef' }}>
+    <div className="pg-font" style={{ minHeight: '100vh', width: '100%', background: '#f7f4ef' }}>
+      <style>{`.pg-font :not(header):not(header *) { font-family: Arial, Helvetica, sans-serif; }`}</style>
       <CommonHeader self={storedUser} page="profile-edit" onDeck={onGoDeck} onProfile={onGoProfile} onLogout={onLogout} />
       {tempLogin && (
         <div style={{ margin: '12px 24px 0', padding: '10px 14px', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '13px' }}>
