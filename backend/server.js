@@ -3,8 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 
@@ -50,20 +51,45 @@ app.get('/', async (req, res) => {
   }
 });
 
+// ---- passwords: new passwords are stored hashed (scrypt, built into Node). Older plain-text ones still work. ----
+const hashPassword = (pw) => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return `scrypt$${salt}$${crypto.scryptSync(String(pw), salt, 64).toString('hex')}`;
+};
+const checkPassword = (pw, stored) => {
+  if (!stored) return false;
+  if (String(stored).startsWith('scrypt$')) {
+    const [, salt, hex] = String(stored).split('$');
+    if (!salt || !hex) return false;
+    const want = Buffer.from(hex, 'hex');
+    const got = crypto.scryptSync(String(pw), salt, want.length);
+    return want.length === got.length && crypto.timingSafeEqual(want, got);
+  }
+  return String(stored) === String(pw);          // legacy plain-text account
+};
+const TEMP_LOGIN_DAYS = 7;
+const isExpiredTemp = (u) => {
+  if (!u.is_temp || !u.created_at) return false;
+  const t = new Date(u.created_at).getTime();
+  return Number.isFinite(t) && Date.now() - t > TEMP_LOGIN_DAYS * 86400000;
+};
+
 const handleLogin = async (req, res) => {
   let { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ success: false, msg: 'Username and password required' });
   username = String(username).trim(); password = String(password).trim();
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, mobile, email, photo_url, status, uname, password 
-       FROM users 
-       WHERE (id = ? OR uname = ? OR LOWER(uname) = LOWER(?) OR CAST(id AS CHAR) = ?) 
-       AND password = ? AND status = 'active' LIMIT 1`,
-      [username, username, username, username, password]
+      `SELECT id, name, mobile, email, photo_url, status, uname, password, is_temp, shared_profile_id, created_at
+       FROM users
+       WHERE (id = ? OR uname = ? OR LOWER(uname) = LOWER(?) OR CAST(id AS CHAR) = ?)
+       AND status = 'active' LIMIT 10`,
+      [username, username, username, username]
     );
-    if (rows.length === 0) return res.status(401).json({ success: false, msg: 'Invalid username or password' });
-    const user = rows[0];
+    const matches = rows.filter((u) => checkPassword(password, u.password));
+    if (matches.length === 0) return res.status(401).json({ success: false, msg: 'Invalid username or password' });
+    const user = matches[0];
+    if (isExpiredTemp(user)) return res.status(401).json({ success: false, msg: 'This temporary login has expired. Ask your family member to send a new one.' });
     try {
       const [pExist] = await pool.query(`SELECT id FROM profiles WHERE owner_user_id = ? OR id = ? LIMIT 1`, [user.id, user.id]);
       if (pExist.length === 0) {
@@ -71,9 +97,13 @@ const handleLogin = async (req, res) => {
       } else {
         await pool.query(`UPDATE profiles SET display_name = ? WHERE (owner_user_id = ? OR id = ?) AND (display_name='Hidden' OR display_name='' OR display_name IS NULL)`, [user.name, user.id, user.id]);
       }
+      // first login with an invitation: this family member now owns their profile
+      if (user.is_temp && user.shared_profile_id) {
+        await pool.query(`UPDATE profiles SET is_claimed = 1, owner_user_id = ? WHERE id = ? AND is_claimed = 0`, [user.id, user.shared_profile_id]);
+      }
     } catch (e) { console.log('auto-create profile skipped:', e.message); }
-    const userData = { id: user.id, name: user.name, uname: user.uname, username: user.uname || user.id, mobile: user.mobile, email: user.email, photo_url: user.photo_url, status: user.status };
-    res.json({ success: true, msg: `Welcome, ${user.name}!`, user: userData, id: userData.id, name: userData.name, uname: userData.uname, photo_url: userData.photo_url });
+    const userData = { id: user.id, name: user.name, uname: user.uname, username: user.uname || user.id, mobile: user.mobile, email: user.email, photo_url: user.photo_url, status: user.status, is_temp: user.is_temp ? 1 : 0 };
+    res.json({ success: true, msg: `Welcome, ${user.name}!`, user: userData, id: userData.id, name: userData.name, uname: userData.uname, photo_url: userData.photo_url, is_temp: userData.is_temp });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, msg: 'Database error' });
@@ -148,18 +178,408 @@ app.post('/api/profiles/auto-create', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------------------------
+// reconcileFamily: keeps every link in a family consistent, in BOTH directions, whatever order
+// people were added in. Safe to run any number of times (it only adds what is missing).
+//   * child  -> Father/Mother rows, and parent -> Child rows
+//   * both parents of a child become spouses of each other, and the child sits under that marriage
+//   * everyone who shares a parent is a Sibling of each other (both directions)
+//   * every Spouse row has its mirror row
+// ---------------------------------------------------------------------------------------------
+// Every person connected to the seeds through relation rows or father/mother fields.
+// skipId = a person we must NOT walk through (used to see who would be cut off if they were removed).
+async function collectFamily(conn, seedIds, skipId = null) {
+  const ids = new Set((seedIds || []).filter((i) => i && i !== skipId));
+  let frontier = [...ids];
+  while (frontier.length && ids.size < 1000) {
+    const batch = frontier; frontier = [];
+    const ph = batch.map(() => '?').join(',');
+    const [rel] = await conn.query(`SELECT owner_profile_id AS a, related_profile_id AS b FROM profile_relations WHERE owner_profile_id IN (${ph}) OR related_profile_id IN (${ph})`, [...batch, ...batch]);
+    const [prof] = await conn.query(`SELECT id, father_id, mother_id FROM profiles WHERE id IN (${ph}) OR father_id IN (${ph}) OR mother_id IN (${ph})`, [...batch, ...batch, ...batch]);
+    const found = [];
+    rel.forEach((r) => found.push(r.a, r.b));
+    prof.forEach((p) => found.push(p.id, p.father_id, p.mother_id));
+    found.filter((i) => i && i !== skipId).forEach((i) => { if (!ids.has(i)) { ids.add(i); frontier.push(i); } });
+  }
+  return ids;
+}
+
+// all ancestors (parents, grandparents ...) of a person, used to stop impossible links like "your child is your father"
+async function ancestorsOf(conn, id) {
+  const seen = new Set(); let frontier = [id];
+  for (let depth = 0; depth < 40 && frontier.length; depth++) {
+    const ph = frontier.map(() => '?').join(',');
+    const [rows] = await conn.query(`SELECT father_id, mother_id FROM profiles WHERE id IN (${ph})`, frontier);
+    frontier = [];
+    rows.forEach((r) => [r.father_id, r.mother_id].forEach((p) => { if (p && !seen.has(p)) { seen.add(p); frontier.push(p); } }));
+  }
+  return seen;
+}
+
+async function reconcileFamily(conn, seedIds) {
+  const ids = await collectFamily(conn, seedIds);
+  const all = [...ids];
+  if (!all.length) return { added: 0 };
+  const ph = all.map(() => '?').join(',');
+  const [profs] = await conn.query(`SELECT id, father_id, mother_id FROM profiles WHERE id IN (${ph})`, all);
+  const known = new Set(profs.map((p) => p.id));
+  let added = 0;
+
+  const getRel = async (a, b, type) => {
+    const [r] = await conn.query(`SELECT id, spouse_group FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = ? LIMIT 1`, [a, b, type]);
+    return r[0] || null;
+  };
+  const ensure = async (a, b, type, o = {}) => {
+    const r = await getRel(a, b, type);
+    if (!r) {
+      await conn.query(
+        `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, birth_order, created_at) VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW())`,
+        [a, b, type, o.spouse_group ?? null, o.spouse_number ?? null, o.birth_order ?? null]
+      );
+      added++;
+    } else if (o.spouse_group != null && r.spouse_group == null) {
+      await conn.query(`UPDATE profile_relations SET spouse_group = ? WHERE id = ?`, [o.spouse_group, r.id]);
+    }
+  };
+  const nextNo = async (pid) => {
+    const [[r]] = await conn.query(`SELECT COALESCE(MAX(spouse_number), 0) AS n FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Spouse'`, [pid]);
+    return Number(r.n) + 1;
+  };
+  // makes sure A->B and B->A Spouse rows both exist; returns the marriage number each side uses
+  const ensureCouple = async (a, b) => {
+    let ra = await getRel(a, b, 'Spouse');
+    if (!ra) { const n = await nextNo(a); await ensure(a, b, 'Spouse', { spouse_group: String(n), spouse_number: n }); ra = await getRel(a, b, 'Spouse'); }
+    let rb = await getRel(b, a, 'Spouse');
+    if (!rb) { const n = await nextNo(b); await ensure(b, a, 'Spouse', { spouse_group: String(n), spouse_number: n }); rb = await getRel(b, a, 'Spouse'); }
+    return { ga: ra.spouse_group, gb: rb.spouse_group };
+  };
+
+  // 1) parent <-> child rows, 2) parents become spouses and the child sits under that marriage
+  const doneCouples = new Map();
+  for (const p of profs) {
+    if (p.father_id && known.has(p.father_id)) { await ensure(p.id, p.father_id, 'Father'); await ensure(p.father_id, p.id, 'Child'); }
+    if (p.mother_id && known.has(p.mother_id)) { await ensure(p.id, p.mother_id, 'Mother'); await ensure(p.mother_id, p.id, 'Child'); }
+    if (p.father_id && p.mother_id && known.has(p.father_id) && known.has(p.mother_id)) {
+      const key = p.father_id + '|' + p.mother_id;
+      if (!doneCouples.has(key)) doneCouples.set(key, await ensureCouple(p.father_id, p.mother_id));
+      const { ga, gb } = doneCouples.get(key);
+      await ensure(p.father_id, p.id, 'Child', { spouse_group: ga });
+      await ensure(p.mother_id, p.id, 'Child', { spouse_group: gb });
+    }
+  }
+  // 3) everyone who shares a parent is a sibling of each other
+  const byParent = new Map();
+  for (const p of profs) for (const par of [p.father_id, p.mother_id]) {
+    if (par) { if (!byParent.has(par)) byParent.set(par, []); byParent.get(par).push(p.id); }
+  }
+  for (const kids of byParent.values()) {
+    for (const x of kids) for (const y of kids) if (x !== y) await ensure(x, y, 'Sibling');
+  }
+  // 4) every Spouse row has its mirror
+  const [spRows] = await conn.query(`SELECT owner_profile_id AS a, related_profile_id AS b FROM profile_relations WHERE relation_type = 'Spouse' AND owner_profile_id IN (${ph})`, all);
+  for (const r of spRows) {
+    if (!(await getRel(r.b, r.a, 'Spouse'))) { const n = await nextNo(r.b); await ensure(r.b, r.a, 'Spouse', { spouse_group: String(n), spouse_number: n }); }
+  }
+  return { added };
+}
+
+// Checks and repairs the links of a whole family (run when Profile Edit opens; harmless to repeat)
+app.post('/api/profiles/family-repair', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { owner_profile_id } = req.body || {};
+    if (!owner_profile_id) { conn.release(); return res.status(400).json({ success: false, error: 'owner_profile_id required' }); }
+    const [rows] = await conn.query(`SELECT id FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [owner_profile_id, owner_profile_id, owner_profile_id]);
+    if (!rows.length) { conn.release(); return res.status(404).json({ success: false, error: 'Profile not found' }); }
+    await conn.beginTransaction();
+    const out = await reconcileFamily(conn, [rows[0].id]);
+    await conn.commit();
+    res.json({ success: true, ...out });
+  } catch (e) {
+    try { await conn.rollback(); } catch {}
+    console.error('family-repair error:', e);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  } finally { try { conn.release(); } catch {} }
+});
+
+// ---------------------------------------------------------------------------------------------
+// SEARCH: find a person who already exists, so they can be linked instead of creating a duplicate.
+// Privacy: other people's profiles only appear when they have claimed an account and are public.
+// Your own family members always appear. Email / phone only match when typed in full, never in part.
+// ---------------------------------------------------------------------------------------------
+app.get('/api/profiles/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const ownerRef = String(req.query.owner_profile_id || '').trim();
+    if (q.length < 2) return res.json({ success: true, data: [] });
+    const [orows] = await pool.query(`SELECT id, owner_user_id FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [ownerRef, ownerRef, ownerRef]);
+    if (!orows.length) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const me = orows[0];
+    const like = `%${q.replace(/[%_\\]/g, '')}%`;
+    const [rows] = await pool.query(
+      `SELECT id, display_name, nickname, gender, location, dob, photo_compressed_url, photo_url, is_claimed, owner_user_id, visibility, email, mobile_number
+         FROM profiles
+        WHERE id <> ?
+          AND (display_name LIKE ? OR nickname LIKE ? OR LOWER(email) = LOWER(?) OR mobile_number = ?)
+          AND (owner_user_id = ? OR (is_claimed = 1 AND LOWER(COALESCE(visibility, 'public')) <> 'private'))
+        ORDER BY (owner_user_id = ?) DESC, display_name
+        LIMIT 25`,
+      [me.id, like, like, q, q, me.owner_user_id, me.owner_user_id]
+    );
+    // leave out people who are already linked to this person
+    const [rel] = await pool.query(`SELECT related_profile_id AS id FROM profile_relations WHERE owner_profile_id = ?`, [me.id]);
+    const linked = new Set(rel.map((r) => r.id));
+    const photo = (p) => {
+      const u = p.photo_compressed_url || p.photo_url || '';
+      return u.startsWith('blob:') || u.startsWith('data:') ? '' : u;
+    };
+    const data = rows.filter((p) => !linked.has(p.id)).slice(0, 10).map((p) => ({
+      id: p.id, display_name: p.display_name, nickname: p.nickname || '', gender: p.gender || '',
+      location: p.location || '', is_claimed: p.is_claimed ? 1 : 0, mine: p.owner_user_id === me.owner_user_id ? 1 : 0,
+      photo: photo(p), exact: (p.email && p.email.toLowerCase() === q.toLowerCase()) || p.mobile_number === q ? 1 : 0,
+    }));
+    res.json({ success: true, data });
+  } catch (e) {
+    console.error('search error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// REMOVE a family member. Call with confirm:false for a preview (nothing changes), confirm:true to do it.
+//   * only people YOU added (and who have not claimed their own account) are really deleted
+//   * a person who claimed their own account is only UNLINKED from this family, never deleted
+//   * people who would be cut off from your family (only reachable through the removed person) are
+//     removed too, but only the ones you added, and only after you have seen the list
+//   * a parent cannot be removed while that would leave their children (who have siblings) with no parent
+// ---------------------------------------------------------------------------------------------
+app.post('/api/profiles/family-remove', async (req, res) => {
+  const conn = await pool.getConnection();
+  const done = () => { try { conn.release(); } catch {} };
+  try {
+    const { owner_profile_id, profile_id, home_id, confirm } = req.body || {};
+    if (!owner_profile_id || !profile_id || !home_id) { done(); return res.status(400).json({ success: false, error: 'owner_profile_id, profile_id and home_id are required' }); }
+    await conn.beginTransaction();
+    const bail = async (status, msg) => { await conn.rollback(); done(); return res.status(status).json({ success: false, error: msg }); };
+    const resolveP = async (ref) => {
+      const [r] = await conn.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [ref, ref, ref]);
+      return r[0] || null;
+    };
+    const home = await resolveP(home_id);
+    const owner = await resolveP(owner_profile_id);
+    const [xr] = await conn.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [profile_id]);
+    const X = xr[0];
+    if (!home || !owner || !X) return bail(404, 'Person not found');
+    if (X.id === home.id) return bail(400, 'You cannot remove yourself');
+    if (X.id === owner.id) return bail(400, 'Choose a family member to remove');
+
+    const famAll = await collectFamily(conn, [home.id]);
+    if (!famAll.has(X.id)) return bail(403, 'That person is not part of your family');
+    const reach = await collectFamily(conn, [home.id], X.id);            // who stays connected without X
+    const orphans = [...famAll].filter((i) => i !== X.id && !reach.has(i));
+
+    const profMap = new Map();
+    const loadProfiles = async (list) => {
+      if (!list.length) return;
+      const ph = list.map(() => '?').join(',');
+      const [rows] = await conn.query(`SELECT id, display_name, is_claimed, owner_user_id, father_id, mother_id FROM profiles WHERE id IN (${ph})`, list);
+      rows.forEach((r) => profMap.set(r.id, r));
+    };
+    await loadProfiles([X.id, ...orphans]);
+    const mineToDelete = (p) => p && !p.is_claimed && p.owner_user_id === home.owner_user_id;
+
+    const unlinkOnly = !!X.is_claimed;
+    if (!unlinkOnly && !mineToDelete(X)) return bail(403, 'You can only delete people you added yourself');
+    if (unlinkOnly) {
+      const [direct] = await conn.query(`SELECT id FROM profile_relations WHERE (owner_profile_id = ? AND related_profile_id = ?) OR (owner_profile_id = ? AND related_profile_id = ?) LIMIT 1`, [owner.id, X.id, X.id, owner.id]);
+      if (!direct.length && owner.father_id !== X.id && owner.mother_id !== X.id && X.father_id !== owner.id && X.mother_id !== owner.id) return bail(400, 'That person is not directly linked here');
+      // a claimed person is a real account with their own family, so shared children must be dealt with first
+      const [shared] = await conn.query(`SELECT display_name FROM profiles WHERE (father_id = ? AND mother_id = ?) OR (father_id = ? AND mother_id = ?)`, [owner.id, X.id, X.id, owner.id]);
+      if (shared.length) return bail(409, `${X.display_name} is the other parent of ${shared.map((k) => k.display_name).join(', ')}. Remove the children first.`);
+    }
+
+    // who really gets deleted
+    const deleteIds = unlinkOnly ? [] : [X.id, ...orphans.filter((i) => mineToDelete(profMap.get(i)))];
+    const gone = new Set(deleteIds);
+    // who loses their links but stays (claimed accounts, or people somebody else added)
+    const detached = unlinkOnly ? [X.id] : orphans.filter((i) => !gone.has(i));
+
+    // rule: never leave brothers / sisters without any parent
+    const staying = [...famAll].filter((i) => !gone.has(i));
+    if (staying.length) {
+      const ph = staying.map(() => '?').join(',');
+      const [kids] = await conn.query(`SELECT id, display_name, father_id, mother_id FROM profiles WHERE id IN (${ph}) AND (father_id = ? OR mother_id = ?)`, [...staying, X.id, X.id]);
+      const blockedNames = [];
+      for (const k of kids) {
+        const keepsFather = k.father_id && k.father_id !== X.id && !gone.has(k.father_id);
+        const keepsMother = k.mother_id && k.mother_id !== X.id && !gone.has(k.mother_id);
+        if (keepsFather || keepsMother) continue;
+        const [sib] = await conn.query(`SELECT related_profile_id AS id FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Sibling'`, [k.id]);
+        if (sib.some((s) => !gone.has(s.id))) blockedNames.push(k.display_name);
+      }
+      if (blockedNames.length) return bail(409, `Remove the brothers and sisters first (${blockedNames.join(', ')}), because they would be left with no parent`);
+    }
+
+    const nameOf = (id) => (profMap.get(id) || {}).display_name || 'Unknown';
+    const plan = {
+      action: unlinkOnly ? 'unlink' : 'delete',
+      person: { id: X.id, name: X.display_name },
+      delete: deleteIds.map((i) => ({ id: i, name: nameOf(i) })),
+      detach: detached.filter((i) => i !== X.id).map((i) => ({ id: i, name: nameOf(i) })),
+    };
+    if (!confirm) { await conn.rollback(); done(); return res.json({ success: true, preview: true, ...plan }); }
+
+    if (unlinkOnly) {
+      await conn.query(`DELETE FROM profile_relations WHERE (owner_profile_id = ? AND related_profile_id = ?) OR (owner_profile_id = ? AND related_profile_id = ?)`, [owner.id, X.id, X.id, owner.id]);
+      await conn.query(`UPDATE profiles SET father_id = NULL WHERE id = ? AND father_id = ?`, [owner.id, X.id]);
+      await conn.query(`UPDATE profiles SET mother_id = NULL WHERE id = ? AND mother_id = ?`, [owner.id, X.id]);
+      await conn.query(`UPDATE profiles SET father_id = NULL WHERE id = ? AND father_id = ?`, [X.id, owner.id]);
+      await conn.query(`UPDATE profiles SET mother_id = NULL WHERE id = ? AND mother_id = ?`, [X.id, owner.id]);
+    } else {
+      for (const id of deleteIds) {
+        await conn.query(`DELETE FROM profile_relations WHERE owner_profile_id = ? OR related_profile_id = ?`, [id, id]);
+        await conn.query(`UPDATE profiles SET father_id = NULL WHERE father_id = ?`, [id]);
+        await conn.query(`UPDATE profiles SET mother_id = NULL WHERE mother_id = ?`, [id]);
+        await conn.query(`DELETE FROM profiles WHERE id = ?`, [id]);
+      }
+    }
+    await reconcileFamily(conn, [home.id, owner.id].filter((i) => !gone.has(i)));
+    await conn.commit();
+    done();
+
+    // photos of deleted people leave the bucket too (best effort, never blocks the answer)
+    for (const id of deleteIds) {
+      for (const f of ['compressed.jpg', 'original.jpg']) {
+        try { await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: `${id}/profileimg/${f}` })); } catch { /* ignore */ }
+      }
+    }
+    res.json({ success: true, removed: true, ...plan });
+  } catch (e) {
+    try { await conn.rollback(); } catch {}
+    console.error('family-remove error:', e);
+    done();
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// INVITE: give a family member you added a TEMPORARY login, to share by WhatsApp / SMS.
+//   * the login id is the same as the profile id, so they land straight on their own family tree
+//   * the password is shown once and stored hashed; it works for TEMP_LOGIN_DAYS days
+//   * asking again for the same person makes a fresh password (until they set their own)
+// ---------------------------------------------------------------------------------------------
+const makeTempPassword = () => {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';          // no 0/o/1/l/i to avoid mistakes when typing
+  let out = '';
+  for (let i = 0; i < 8; i++) out += chars[crypto.randomInt(chars.length)];
+  return out;
+};
+
+app.post('/api/profiles/invite', async (req, res) => {
+  try {
+    const { profile_id, home_id } = req.body || {};
+    const mobile = String((req.body || {}).mobile || '').replace(/\D/g, '');
+    if (!profile_id || !home_id) return res.status(400).json({ success: false, error: 'profile_id and home_id are required' });
+
+    const [hr] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [home_id, home_id, home_id]);
+    const [pr] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [profile_id]);
+    if (!hr.length || !pr.length) return res.status(404).json({ success: false, error: 'Person not found' });
+    const home = hr[0], P = pr[0];
+    if (P.id === home.id) return res.status(400).json({ success: false, error: 'That is you' });
+
+    const fam = await collectFamily(pool, [home.id]);
+    if (!fam.has(P.id)) return res.status(403).json({ success: false, error: 'That person is not part of your family' });
+
+    const [ur] = await pool.query(`SELECT id, uname, is_temp, invited_by_user_id FROM users WHERE id = ? LIMIT 1`, [P.id]);
+    const u = ur[0] || null;
+    const mine = P.owner_user_id === home.owner_user_id || (u && u.invited_by_user_id === home.owner_user_id);
+    if (!mine) return res.status(403).json({ success: false, error: 'You can only invite people you added yourself' });
+    if (u && !u.is_temp) return res.status(409).json({ success: false, error: `${P.display_name} already has their own login` });
+    if (P.is_claimed && !u) return res.status(409).json({ success: false, error: `${P.display_name} already has an account` });
+
+    const password = makeTempPassword();
+    let uname;
+    if (u) {
+      uname = u.uname;
+      await pool.query(`UPDATE users SET password = ?, created_at = NOW(), status = 'active' WHERE id = ?`, [hashPassword(password), P.id]);
+    } else {
+      const base = (String(P.display_name || 'user').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim().split(/\s+/)[0] || 'user').slice(0, 14);
+      for (let i = 0; i < 20; i++) {
+        const cand = `${base}.${crypto.randomInt(1000, 10000)}`;
+        const [t] = await pool.query(`SELECT id FROM users WHERE LOWER(uname) = ? OR id = ? LIMIT 1`, [cand, cand]);
+        if (!t.length) { uname = cand; break; }
+      }
+      if (!uname) return res.status(500).json({ success: false, error: 'Could not make a username, please try again' });
+      // mobile / email are unique in the users table: only use them when nobody else has them
+      const free = async (col, val) => {
+        if (!val) return null;
+        const [t] = await pool.query(`SELECT id FROM users WHERE ${col} = ? LIMIT 1`, [val]);
+        return t.length ? null : val;
+      };
+      const mob = await free('mobile', mobile || P.mobile_number || null);
+      const mail = await free('email', P.email || null);
+      await pool.query(
+        `INSERT INTO users (id, name, mobile, email, password, status, invited_by_user_id, created_at, uname, shared_profile_id, is_temp)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, NOW(), ?, ?, 1)`,
+        [P.id, P.display_name, mob, mail, hashPassword(password), home.owner_user_id, uname, P.id]
+      );
+    }
+    if (mobile && !P.mobile_number) await pool.query(`UPDATE profiles SET mobile_number = ? WHERE id = ? AND (mobile_number IS NULL OR mobile_number = '')`, [mobile, P.id]);
+    res.json({ success: true, username: uname, password, valid_days: TEMP_LOGIN_DAYS, name: P.display_name, renewed: !!u });
+  } catch (e) {
+    console.error('invite error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// does this login still use a temporary password? (the pages show a "set your own" reminder)
+app.get('/api/account/status/:id', async (req, res) => {
+  try {
+    const [r] = await pool.query(`SELECT is_temp FROM users WHERE id = ? LIMIT 1`, [req.params.id]);
+    res.json({ success: true, is_temp: r.length && r[0].is_temp ? 1 : 0 });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// the invited person chooses their own username / password (needs the current one, like a login)
+app.post('/api/account/set-credentials', async (req, res) => {
+  try {
+    const { user_id, current_password } = req.body || {};
+    const newU = String((req.body || {}).new_uname || '').trim();
+    const newP = String((req.body || {}).new_password || '');
+    if (!user_id || !current_password) return res.status(400).json({ success: false, error: 'Current password required' });
+    if (!newU && !newP) return res.status(400).json({ success: false, error: 'Enter a new username or password' });
+    const [rows] = await pool.query(`SELECT id, uname, password, is_temp, status FROM users WHERE id = ? LIMIT 1`, [user_id]);
+    const u = rows[0];
+    if (!u || u.status !== 'active' || !checkPassword(String(current_password).trim(), u.password)) return res.status(401).json({ success: false, error: 'Current password is wrong' });
+    if (newU) {
+      if (!/^[a-zA-Z0-9._-]{3,30}$/.test(newU)) return res.status(400).json({ success: false, error: 'Username: 3-30 letters, numbers, . _ -' });
+      const [t] = await pool.query(`SELECT id FROM users WHERE (LOWER(uname) = LOWER(?) OR id = ?) AND id <> ? LIMIT 1`, [newU, newU, u.id]);
+      if (t.length) return res.status(409).json({ success: false, error: 'That username is taken, try another' });
+    }
+    if (newP) {
+      if (newP.length < 6) return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+      if (newP === String(current_password).trim()) return res.status(400).json({ success: false, error: 'Choose a different password' });
+    }
+    await pool.query(`UPDATE users SET uname = ?, password = ?, is_temp = 0 WHERE id = ?`, [newU || u.uname, newP ? hashPassword(newP) : u.password, u.id]);
+    res.json({ success: true, uname: newU || u.uname });
+  } catch (e) {
+    console.error('set-credentials error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.post('/api/profiles/family-add', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { owner_profile_id, display_name, gender, relation_type, spouse_id } = req.body;
+    const { owner_profile_id, display_name, gender, relation_type, spouse_id, existing_profile_id } = req.body;
     const TYPES = ['Father', 'Mother', 'Spouse', 'Sibling', 'Child'];
     const fail = async (status, msg) => { await conn.rollback(); return res.status(status).json({ success: false, error: msg }); };
 
-    if (!owner_profile_id || !display_name || !String(display_name).trim() || !TYPES.includes(relation_type)) {
+    if (!owner_profile_id || !TYPES.includes(relation_type) || (!existing_profile_id && !(display_name && String(display_name).trim()))) {
       return fail(400, 'Name and a valid relation are required');
     }
-    const name = String(display_name).trim();
+    const name = String(display_name || '').trim();
 
     // The person we are adding family TO (can be you, or any family member you added before)
     const [ownerRows] = await conn.query(
@@ -170,20 +590,36 @@ app.post('/api/profiles/family-add', async (req, res) => {
     const owner = ownerRows[0];
     const ownerId = owner.id;
 
+    // linking a person who already exists (found by search) instead of creating a new one
+    let existing = null;
+    if (existing_profile_id) {
+      const [er] = await conn.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [existing_profile_id]);
+      if (!er.length) return fail(404, 'That person was not found');
+      existing = er[0];
+      if (existing.id === ownerId) return fail(400, 'A person cannot be linked to themselves');
+      const [already] = await conn.query(`SELECT id FROM profile_relations WHERE (owner_profile_id = ? AND related_profile_id = ?) OR (owner_profile_id = ? AND related_profile_id = ?) LIMIT 1`, [ownerId, existing.id, existing.id, ownerId]);
+      if (already.length || owner.father_id === existing.id || owner.mother_id === existing.id || existing.father_id === ownerId || existing.mother_id === ownerId) {
+        return fail(409, `${existing.display_name} is already in this family`);
+      }
+    }
     const [[uuidRow]] = await conn.query('SELECT UUID() AS uuid');
-    const newId = uuidRow.uuid;
+    const newId = existing ? existing.id : uuidRow.uuid;
 
-    const addProfile = (g, fatherId, motherId) => conn.query(
+    const addProfile = (g, fatherId, motherId) => existing ? Promise.resolve() : conn.query(
       `INSERT INTO profiles (id, owner_user_id, display_name, gender, father_id, mother_id, show_in_deck, is_claimed, created_by_user_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NOW())`,
       [newId, owner.owner_user_id, name, g, fatherId || null, motherId || null, owner.owner_user_id]
     );
     // profile_relations.id has no default value, so every row gets its own UUID()
-    const addRel = (a, b, type, o = {}) => conn.query(
-      `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, birth_order, created_at)
-       VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW())`,
-      [a, b, type, o.spouse_group ?? null, o.spouse_number ?? null, o.birth_order ?? null]
-    );
+    const addRel = async (a, b, type, o = {}) => {
+      const [ex] = await conn.query(`SELECT id FROM profile_relations WHERE owner_profile_id = ? AND related_profile_id = ? AND relation_type = ? LIMIT 1`, [a, b, type]);
+      if (ex.length) return;                                    // never create a duplicate link
+      return conn.query(
+        `INSERT INTO profile_relations (id, owner_profile_id, related_profile_id, relation_type, spouse_group, spouse_number, birth_order, created_at)
+         VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW())`,
+        [a, b, type, o.spouse_group ?? null, o.spouse_number ?? null, o.birth_order ?? null]
+      );
+    };
 
     // ----- helpers for linking parents as spouses of each other -----
     const nextSpouseNo = async (pid) => {
@@ -215,6 +651,12 @@ app.post('/api/profiles/family-add', async (req, res) => {
       const col = isFather ? 'father_id' : 'mother_id';
       const otherParentId = isFather ? owner.mother_id : owner.father_id;
       if (owner[col]) return fail(409, `${relation_type} is already added`);
+      if (existing) {
+        const want = isFather ? 'Male' : 'Female';
+        if (existing.gender && existing.gender !== want) return fail(400, `${existing.display_name} is ${existing.gender}, so cannot be added as ${relation_type}`);
+        if ((await ancestorsOf(conn, existing.id)).has(ownerId)) return fail(400, `${existing.display_name} is your descendant, so cannot be your ${relation_type}`);
+        if (!existing.gender) await conn.query(`UPDATE profiles SET gender = ? WHERE id = ?`, [want, existing.id]);
+      }
       await addProfile(isFather ? 'Male' : 'Female', null, null); // gender is fixed by the relation
       await conn.query(`UPDATE profiles SET ${col} = ? WHERE id = ?`, [newId, ownerId]);
       await addRel(ownerId, newId, relation_type);
@@ -253,6 +695,13 @@ app.post('/api/profiles/family-add', async (req, res) => {
         [ownerId, chosen.spouse_group]
       );
       const order = olderKids.length + 1;
+      if (existing) {
+        if ((existing.father_id && existing.father_id !== fatherId) || (existing.mother_id && existing.mother_id !== motherId)) {
+          return fail(409, `${existing.display_name} already has other parents`);
+        }
+        if ((await ancestorsOf(conn, ownerId)).has(existing.id)) return fail(400, `${existing.display_name} is your ancestor, so cannot be your child`);
+        await conn.query(`UPDATE profiles SET father_id = ?, mother_id = ? WHERE id = ?`, [fatherId, motherId, existing.id]);
+      }
       await addProfile(gender || 'Male', fatherId, motherId);
       await addRel(ownerId, newId, 'Child', { spouse_group: chosen.spouse_group, birth_order: order });
       const spouseSideGroup = await spouseGroupOf(spouseId, ownerId);
@@ -269,6 +718,14 @@ app.post('/api/profiles/family-add', async (req, res) => {
       if (!owner.father_id && !owner.mother_id) return fail(400, 'Add a parent first, then add siblings');
       const [[cnt]] = await conn.query(`SELECT COUNT(*) AS c FROM profile_relations WHERE owner_profile_id = ? AND relation_type = 'Sibling'`, [ownerId]);
       const order = Number(cnt.c) + 1;
+      if (existing) {
+        if ((existing.father_id && owner.father_id && existing.father_id !== owner.father_id) || (existing.mother_id && owner.mother_id && existing.mother_id !== owner.mother_id)) {
+          return fail(409, `${existing.display_name} has different parents, so cannot be added as a sibling`);
+        }
+        const anc = await ancestorsOf(conn, ownerId);
+        if (anc.has(existing.id)) return fail(400, `${existing.display_name} is your ancestor, so cannot be your sibling`);
+        await conn.query(`UPDATE profiles SET father_id = COALESCE(father_id, ?), mother_id = COALESCE(mother_id, ?) WHERE id = ?`, [owner.father_id || null, owner.mother_id || null, existing.id]);
+      }
       await addProfile(gender || 'Male', owner.father_id, owner.mother_id);
       await addRel(ownerId, newId, 'Sibling', { birth_order: order });
       await addRel(newId, ownerId, 'Sibling');
@@ -286,6 +743,9 @@ app.post('/api/profiles/family-add', async (req, res) => {
       }
     }
 
+    // make sure every parent / sibling / spouse link is mirrored on the other people too
+    await reconcileFamily(conn, [ownerId, newId]);
+
     await conn.commit();
     const [newProfileRows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [newId]);
     res.json({ success: true, data: newProfileRows[0] });
@@ -296,14 +756,7 @@ app.post('/api/profiles/family-add', async (req, res) => {
   } finally { conn.release(); }
 });
 
-app.delete('/api/profiles/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    await pool.query(`DELETE FROM profile_relations WHERE owner_profile_id = ? OR related_profile_id = ?`, [id, id]);
-    await pool.query(`DELETE FROM profiles WHERE id = ?`, [id]);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
+// (the old open DELETE /api/profiles/:id route was removed: it let anyone delete any profile. Use /api/profiles/family-remove)
 
 app.get('/api/family', async (req, res) => {
   try {

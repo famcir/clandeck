@@ -289,7 +289,7 @@ function PersonEditor({ profile, isSelf, storedUser, onSaved, onCancel }) {
 // =====================================================================
 // One family member row: photo, name, Edit and "Family" buttons
 // =====================================================================
-function PersonCard({ p, relation, onEdit, onOpen }) {
+function PersonCard({ p, relation, onEdit, onOpen, onInvite }) {
   const img = p.photo_compressed_url || p.photo_url;
   const bits = [relation, p.gender, isGone(p) ? 'passed away' : null].filter(Boolean);
   return (
@@ -303,7 +303,8 @@ function PersonCard({ p, relation, onEdit, onOpen }) {
         </div>
         <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '2px' }}>{bits.join(' • ')}</div>
       </div>
-      <div style={{ display: 'flex', gap: '6px', flex: '0 0 auto' }}>
+      <div style={{ display: 'flex', gap: '6px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '190px' }}>
+        {onInvite && !p.is_claimed && <button type="button" onClick={() => onInvite(p)} title="Give this person a temporary login and share it" style={smallBtn}>📤 Invite</button>}
         <button type="button" onClick={() => onEdit(p)} style={smallBtn}>✏️ Edit</button>
         <button type="button" onClick={() => onOpen(p, relation)} style={{ ...smallBtn, background: '#111', color: 'white', border: '1px solid #111' }}>Family →</button>
       </div>
@@ -338,12 +339,42 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const [addGender, setAddGender] = useState('Male');
   const [addSpouse, setAddSpouse] = useState('');
   const [busy, setBusy] = useState(false);
+  const [matches, setMatches] = useState([]);                // people who already exist and match the typed name
+  const [picked, setPicked] = useState(null);                // an existing person chosen from that list
+  const [removePlan, setRemovePlan] = useState(null);        // preview of what removing a member will do
+  const [invite, setInvite] = useState(null);                // { person, mobile, result } while the share pop-up is open
+  const [tempLogin, setTempLogin] = useState(false);         // this login still uses a temporary password
+  const [credsOpen, setCredsOpen] = useState(false);
+  const [creds, setCreds] = useState({ current: '', uname: '', pass: '', pass2: '' });
+
+  // ----- look for people who already exist while a name is typed in the Add pop-up -----
+  useEffect(() => {
+    if (!showAdd || picked || addName.trim().length < 2 || !focus) { setMatches([]); return undefined; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await fetchJSON(`/api/profiles/search?q=${encodeURIComponent(addName.trim())}&owner_profile_id=${encodeURIComponent(focus.id)}`);
+        if (alive && data.success) setMatches(data.data || []);
+      } catch { if (alive) setMatches([]); }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [addName, showAdd, picked, focus]);
+
+  // ----- is this login still a temporary one? (shows the "set your own username & password" reminder) -----
+  useEffect(() => {
+    if (!userId) return;
+    fetchJSON(`/api/account/status/${encodeURIComponent(userId)}`).then(({ data }) => setTempLogin(!!(data && data.is_temp))).catch(() => {});
+  }, [userId]);
 
   // ----- first load -----
   useEffect(() => {
     if (!userId) { setLoading(false); return; }
     (async () => {
       try {
+        // quietly make sure every family link is mirrored on the other people (fixes anything added earlier)
+        try {
+          await fetchJSON('/api/profiles/family-repair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ owner_profile_id: userId }) });
+        } catch { /* not important */ }
         let j = null;
         try { j = await loadTree(userId); } catch { /* fall back below */ }
         if (j) {
@@ -389,25 +420,26 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
     let g = 'Male';
     if (type === 'Mother') g = 'Female';
     if (type === 'Spouse') g = focus.profile.gender === 'Female' ? 'Male' : 'Female';
-    setAddName(''); setAddGender(g);
+    setAddName(''); setAddGender(g); setPicked(null); setMatches([]);
     setAddSpouse(spouseId || (fam.spouses.length === 1 ? fam.spouses[0].id : ''));
     setShowAdd({ type });
   };
 
   const handleAdd = async () => {
-    if (!addName.trim()) return alert('Enter name');
+    if (!picked && !addName.trim()) return alert('Enter name');
     if (showAdd.type === 'Child' && !addSpouse) return alert('Please select the spouse this child belongs to');
     setBusy(true);
     try {
       const res = await fetchJSON('/api/profiles/family-add', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          owner_profile_id: focus.id, display_name: addName.trim(), gender: addGender,
+          owner_profile_id: focus.id, display_name: picked ? picked.display_name : addName.trim(), gender: addGender,
+          existing_profile_id: picked ? picked.id : null,
           relation_type: showAdd.type, spouse_id: showAdd.type === 'Child' ? addSpouse : null
         })
       });
       if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not add');
-      setShowAdd(null); setAddName('');
+      setShowAdd(null); setAddName(''); setPicked(null); setMatches([]);
       await refreshFocus();
     } catch (e) { alert(e.message); }
     setBusy(false);
@@ -425,6 +457,89 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
     refreshFocus().catch(() => {});
   };
 
+  // ----- invite: temporary login to share by WhatsApp / SMS -----
+  const openInvite = (p) => setInvite({ person: p, mobile: p.mobile_number || '', result: null });
+
+  const createInvite = async () => {
+    setBusy(true);
+    try {
+      const res = await fetchJSON('/api/profiles/invite', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile_id: invite.person.id, home_id: me.id, mobile: invite.mobile })
+      });
+      if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not create the login');
+      setInvite((i) => ({ ...i, result: res.data }));
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
+  const inviteText = () => {
+    const r = invite.result;
+    return `Hi ${r.name}, ${me.display_name || 'a family member'} added you to the family tree on ClanDeck.\n\nOpen https://clandeck.com and log in with\nUsername: ${r.username}\nPassword: ${r.password}\n\nThis temporary login works for ${r.valid_days} days. After you log in, please set your own username and password.`;
+  };
+  // phone number for the links: digits only; a plain 10-digit number gets the India code 91
+  const waNumber = () => {
+    const d = String(invite.mobile || '').replace(/\D/g, '');
+    return d.length === 10 ? '91' + d : d;
+  };
+  const shareWhatsApp = () => window.open(`https://wa.me/${waNumber()}?text=${encodeURIComponent(inviteText())}`, '_blank', 'noopener');
+  const shareSms = () => { window.location.href = `sms:${waNumber() ? '+' + waNumber() : ''}?body=${encodeURIComponent(inviteText())}`; };
+  const copyInvite = async () => {
+    try { await navigator.clipboard.writeText(inviteText()); alert('Message copied'); } catch { alert('Could not copy, please select the text and copy it'); }
+  };
+
+  // ----- the invited person sets their own username / password -----
+  const saveCreds = async () => {
+    if (creds.pass && creds.pass !== creds.pass2) return alert('The two new passwords do not match');
+    setBusy(true);
+    try {
+      const res = await fetchJSON('/api/account/set-credentials', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, current_password: creds.current, new_uname: creds.uname, new_password: creds.pass })
+      });
+      if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not save');
+      try { localStorage.setItem('user', JSON.stringify({ ...storedUser, uname: res.data.uname, username: res.data.uname, is_temp: 0 })); } catch { /* ignore */ }
+      setTempLogin(false); setCredsOpen(false); setCreds({ current: '', uname: '', pass: '', pass2: '' });
+      alert('Saved. Use your new username and password next time you log in.');
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
+  // ----- removing a family member: first ask the server what would happen, then confirm -----
+  const startRemove = async (member) => {
+    setBusy(true);
+    try {
+      const res = await fetchJSON('/api/profiles/family-remove', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_profile_id: focus.id, profile_id: member.id, home_id: me.id, confirm: false })
+      });
+      if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not remove');
+      setRemovePlan(res.data);
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
+  const confirmRemove = async () => {
+    setBusy(true);
+    try {
+      const res = await fetchJSON('/api/profiles/family-remove', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_profile_id: focus.id, profile_id: removePlan.person.id, home_id: me.id, confirm: true })
+      });
+      if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not remove');
+      const goneIds = new Set((res.data.delete || []).map((x) => x.id).concat(res.data.person ? [res.data.person.id] : []));
+      setRemovePlan(null); setEditing(null);
+      if (goneIds.has(focus.id)) {                      // the page we are on was removed: go back to your own family
+        await refreshFocus(me.id);
+        setTrail((t) => t.slice(0, 1));
+      } else {
+        setTrail((t) => t.filter((x) => !goneIds.has(x.id)));
+        await refreshFocus();
+      }
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Loading...</div>;
   if (!me || !focus) return <div style={{ padding: 40, textAlign: 'center' }}>Please log in again to edit your profile.</div>;
 
@@ -438,6 +553,12 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   return (
     <div style={{ minHeight: '100vh', width: '100%', background: '#f7f4ef' }}>
       <CommonHeader self={storedUser} page="profile-edit" onDeck={onGoDeck} onProfile={onGoProfile} onLogout={onLogout} />
+      {tempLogin && (
+        <div style={{ margin: '12px 24px 0', padding: '10px 14px', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '13px' }}>
+          <span style={{ flex: 1, minWidth: 200 }}>🔑 You are using a <b>temporary login</b>. Please set your own username and password.</span>
+          <button type="button" onClick={() => setCredsOpen(true)} style={{ ...pillBtn(true), padding: '8px 16px' }}>Set now</button>
+        </div>
+      )}
       {/* FULL WIDTH: two columns on wide screens, one column on small screens */}
       <div style={{ width: '100%', boxSizing: 'border-box', padding: '16px 24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: '16px', alignItems: 'start' }}>
 
@@ -486,8 +607,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           {/* PARENTS */}
           <div style={{ ...cardStyle, marginTop: '12px' }}>
             <b style={{ fontSize: '11px' }}>PARENTS</b>
-            {fam.father && <PersonCard p={fam.father} relation="Father" onEdit={setEditing} onOpen={openFamily} />}
-            {fam.mother && <PersonCard p={fam.mother} relation="Mother" onEdit={setEditing} onOpen={openFamily} />}
+            {fam.father && <PersonCard p={fam.father} relation="Father" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />}
+            {fam.mother && <PersonCard p={fam.mother} relation="Mother" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />}
             {!fam.father && !fam.mother && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>None</div>}
           </div>
 
@@ -499,14 +620,14 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
               const kids = fam.children.filter((c) => String(c.spouse_group) === String(sp.spouse_group));
               return (
                 <div key={sp.id} style={{ background: '#faf7f2', border: '1px solid #e9e2d6', borderRadius: '14px', padding: '8px 10px 12px', marginTop: '10px' }}>
-                  <PersonCard p={sp} relation={fam.spouses.length > 1 ? `Spouse ${i + 1}` : 'Spouse'} onEdit={setEditing} onOpen={openFamily} />
+                  <PersonCard p={sp} relation={fam.spouses.length > 1 ? `Spouse ${i + 1}` : 'Spouse'} onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />
                   <div style={{ marginLeft: '14px', paddingLeft: '12px', borderLeft: '2px solid #e9e2d6', marginTop: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                       <b style={{ fontSize: '10px' }}>CHILDREN WITH {String(sp.display_name || '').toUpperCase()} ({kids.length})</b>
                       <button type="button" onClick={() => openAdd('Child', sp.id)} style={smallBtn}>+ Add child</button>
                     </div>
                     {kids.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '6px' }}>None</div>}
-                    {kids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} />)}
+                    {kids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />)}
                   </div>
                 </div>
               );
@@ -514,7 +635,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
             {otherKids.length > 0 && (
               <div style={{ marginTop: '14px' }}>
                 <b style={{ fontSize: '10px' }}>OTHER CHILDREN ({otherKids.length})</b>
-                {otherKids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} />)}
+                {otherKids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />)}
               </div>
             )}
           </div>
@@ -523,7 +644,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           <div style={{ ...cardStyle, marginTop: '12px' }}>
             <b style={{ fontSize: '11px' }}>SIBLINGS ({fam.siblings.length})</b>
             {fam.siblings.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>None</div>}
-            {fam.siblings.map((s) => <PersonCard key={s.id} p={s} relation="Sibling" onEdit={setEditing} onOpen={openFamily} />)}
+            {fam.siblings.map((s) => <PersonCard key={s.id} p={s} relation="Sibling" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />)}
           </div>
         </div>
       </div>
@@ -533,12 +654,41 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
         <Modal onClose={() => setShowAdd(null)}>
           <h3 style={{ fontWeight: 800, margin: 0 }}>Add {showAdd.type}</h3>
           <div style={{ fontSize: '11px', color: '#8a7a65', marginTop: '4px' }}>for {focus.profile.display_name}</div>
-          <input autoFocus value={addName} onChange={(e) => setAddName(e.target.value)} placeholder={`${showAdd.type} Name*`}
-            style={{ width: '100%', marginTop: '14px', padding: '12px', borderRadius: '10px', border: '1px solid #ddd', boxSizing: 'border-box' }} />
+          {picked ? (
+            <div style={{ marginTop: '14px', padding: '10px 12px', borderRadius: '10px', background: '#f1f8f1', border: '1px solid #cfe5cf', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ flex: 1, fontSize: '13px' }}>
+                <b>{picked.display_name}</b>{picked.nickname ? ` (${picked.nickname})` : ''}
+                <div style={{ fontSize: '11px', color: '#5b7a5b' }}>Existing person will be linked as {showAdd.type}</div>
+              </div>
+              <button type="button" onClick={() => { setPicked(null); }} style={smallBtn}>Change</button>
+            </div>
+          ) : (
+            <input autoFocus value={addName} onChange={(e) => setAddName(e.target.value)} placeholder={`${showAdd.type} Name*  (or search by email / phone)`}
+              style={{ width: '100%', marginTop: '14px', padding: '12px', borderRadius: '10px', border: '1px solid #ddd', boxSizing: 'border-box' }} />
+          )}
+          {!picked && matches.length > 0 && (
+            <div style={{ marginTop: '10px', border: '1px solid #e9e2d6', borderRadius: '10px', overflow: 'hidden' }}>
+              <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#8a7a65', background: '#faf7f2' }}>ALREADY ON CLANDECK - TAP TO LINK</div>
+              {matches.map((m) => (
+                <button key={m.id} type="button" onClick={() => { setPicked(m); setMatches([]); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '8px 10px', border: 'none', borderTop: '1px solid #f0e9dc', background: 'white', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: '#e9d8b6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, overflow: 'hidden', flexShrink: 0 }}>
+                    {m.photo ? <img src={m.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} /> : (m.display_name || '?')[0].toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700 }}>{m.display_name}{m.nickname ? ` (${m.nickname})` : ''}</div>
+                    <div style={{ fontSize: '10px', color: '#8a7a65' }}>{[m.gender, m.location].filter(Boolean).join(' • ')}</div>
+                  </div>
+                  <span style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: 10, background: m.is_claimed ? '#e8f3e8' : '#fff3df', color: m.is_claimed ? '#2f6b2f' : '#8a5a10' }}>{m.is_claimed ? 'HAS ACCOUNT' : 'ADDED BY YOU'}</span>
+                </button>
+              ))}
+              <div style={{ padding: '7px 10px', fontSize: '10px', color: '#8a7a65', borderTop: '1px solid #f0e9dc' }}>Not in the list? Just press Add and a new person is created.</div>
+            </div>
+          )}
 
           {showAdd.type === 'Father' && <div style={{ fontSize: '11px', color: '#8a7a65', marginTop: '10px' }}>Gender: Male</div>}
           {showAdd.type === 'Mother' && <div style={{ fontSize: '11px', color: '#8a7a65', marginTop: '10px' }}>Gender: Female</div>}
-          {(showAdd.type === 'Spouse' || showAdd.type === 'Child' || showAdd.type === 'Sibling') && (
+          {!picked && (showAdd.type === 'Spouse' || showAdd.type === 'Child' || showAdd.type === 'Sibling') && (
             <div style={{ marginTop: '12px' }}>
               <label style={labelStyle}>GENDER</label>
               <select value={addGender} onChange={(e) => setAddGender(e.target.value)} style={inputStyle}><option>Male</option><option>Female</option></select>
@@ -556,7 +706,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
             <button type="button" onClick={() => setShowAdd(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-            <button type="button" onClick={handleAdd} disabled={busy} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Adding...' : 'Add'}</button>
+            <button type="button" onClick={handleAdd} disabled={busy} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Adding...' : picked ? 'Link' : 'Add'}</button>
           </div>
         </Modal>
       )}
@@ -566,6 +716,90 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
         <Modal onClose={() => setEditing(null)} maxWidth={520}>
           <h3 style={{ fontWeight: 800, margin: '0 0 12px' }}>Edit {editing.display_name}</h3>
           <PersonEditor key={editing.id} profile={editing} isSelf={false} storedUser={storedUser} onSaved={onMemberSaved} onCancel={() => setEditing(null)} />
+          <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #f0e9dc', textAlign: 'center' }}>
+            <button type="button" disabled={busy} onClick={() => startRemove(editing)}
+              style={{ padding: '10px 18px', borderRadius: '20px', border: '1px solid #ffd1d1', background: '#fff5f5', color: '#d33', fontWeight: 800, fontSize: '12px', cursor: 'pointer' }}>
+              {busy ? 'Checking...' : '🗑 Remove from family'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* INVITE POP-UP: temporary login + WhatsApp / SMS */}
+      {invite && (
+        <Modal onClose={() => !busy && setInvite(null)} maxWidth={440}>
+          <h3 style={{ fontWeight: 800, margin: 0 }}>Invite {invite.person.display_name}</h3>
+          {!invite.result ? (
+            <>
+              <p style={{ fontSize: '13px', color: '#555', lineHeight: 1.5 }}>This makes a <b>temporary username and password</b> for {invite.person.display_name}, valid for 7 days. They log in, see their own family tree, and add their own family members.</p>
+              <label style={labelStyle}>MOBILE NUMBER (FOR WHATSAPP / SMS)</label>
+              <input value={invite.mobile} onChange={(e) => setInvite((i) => ({ ...i, mobile: e.target.value }))} placeholder="e.g. 9876543210" inputMode="tel" style={inputStyle} />
+              <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '4px' }}>A 10-digit number gets the India code (91). For other countries type the full number with the country code.</div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                <button type="button" onClick={() => setInvite(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                <button type="button" disabled={busy} onClick={createInvite} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Creating...' : 'Create temporary login'}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ margin: '12px 0', padding: '12px', background: 'white', border: '1px solid #e9e2d6', borderRadius: '12px', fontSize: '13px', lineHeight: 1.7 }}>
+                <div><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 700 }}>USERNAME</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.username}</b></div>
+                <div style={{ marginTop: '6px' }}><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 700 }}>PASSWORD</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.password}</b></div>
+              </div>
+              <div style={{ fontSize: '11px', color: '#8a5a10', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: '10px', padding: '8px 10px' }}>⚠️ The password is shown only now. Share it right away. If it is lost, press Invite again to make a new one.</div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
+                <button type="button" onClick={shareWhatsApp} style={{ flex: 1, minWidth: 120, padding: '11px', borderRadius: '20px', border: 'none', background: '#25d366', color: 'white', fontWeight: 800, cursor: 'pointer' }}>WhatsApp</button>
+                <button type="button" onClick={shareSms} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: 'none', background: '#1a73e8', color: 'white', fontWeight: 800, cursor: 'pointer' }}>SMS</button>
+                <button type="button" onClick={copyInvite} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 800, cursor: 'pointer' }}>Copy</button>
+              </div>
+              <button type="button" onClick={() => setInvite(null)} style={{ width: '100%', marginTop: '10px', padding: '10px', borderRadius: '20px', border: 'none', background: 'transparent', color: '#8a7a65', fontWeight: 700, cursor: 'pointer' }}>Done</button>
+            </>
+          )}
+        </Modal>
+      )}
+
+      {/* SET YOUR OWN LOGIN (for people who came in with a temporary one) */}
+      {credsOpen && (
+        <Modal onClose={() => !busy && setCredsOpen(false)} maxWidth={400}>
+          <h3 style={{ fontWeight: 800, margin: 0 }}>Set your own login</h3>
+          <label style={{ ...labelStyle, marginTop: '14px', display: 'block' }}>TEMPORARY PASSWORD (CURRENT)</label>
+          <input type="password" value={creds.current} onChange={(e) => setCreds((c) => ({ ...c, current: e.target.value }))} style={inputStyle} autoComplete="current-password" />
+          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW USERNAME</label>
+          <input value={creds.uname} onChange={(e) => setCreds((c) => ({ ...c, uname: e.target.value }))} placeholder="3-30 letters, numbers . _ -" style={inputStyle} autoComplete="username" />
+          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW PASSWORD</label>
+          <input type="password" value={creds.pass} onChange={(e) => setCreds((c) => ({ ...c, pass: e.target.value }))} placeholder="at least 6 characters" style={inputStyle} autoComplete="new-password" />
+          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>REPEAT NEW PASSWORD</label>
+          <input type="password" value={creds.pass2} onChange={(e) => setCreds((c) => ({ ...c, pass2: e.target.value }))} style={inputStyle} autoComplete="new-password" />
+          <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+            <button type="button" onClick={() => setCredsOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Later</button>
+            <button type="button" disabled={busy} onClick={saveCreds} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Saving...' : 'Save'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* CONFIRM REMOVE: shows exactly what will happen first */}
+      {removePlan && (
+        <Modal onClose={() => !busy && setRemovePlan(null)} maxWidth={420}>
+          <h3 style={{ fontWeight: 800, margin: 0 }}>{removePlan.action === 'unlink' ? 'Remove link with' : 'Delete'} {removePlan.person.name}?</h3>
+          {removePlan.action === 'unlink' ? (
+            <p style={{ fontSize: '13px', color: '#555', lineHeight: 1.5 }}>{removePlan.person.name} has their own ClanDeck account, so only the link to this family is removed. Their account and their own family stay safe.</p>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#555', lineHeight: 1.5 }}>This person and their photo will be deleted. This cannot be undone.</p>
+          )}
+          {removePlan.delete && removePlan.delete.length > 1 && (
+            <div style={{ fontSize: '12px', background: '#fff5f5', border: '1px solid #ffd1d1', borderRadius: '10px', padding: '10px', marginBottom: '8px' }}>
+              <b>Also deleted</b> (only connected through {removePlan.person.name}):<br />{removePlan.delete.filter((x) => x.id !== removePlan.person.id).map((x) => x.name).join(', ')}
+            </div>
+          )}
+          {removePlan.detach && removePlan.detach.length > 0 && (
+            <div style={{ fontSize: '12px', background: '#faf7f2', border: '1px solid #e9e2d6', borderRadius: '10px', padding: '10px', marginBottom: '8px' }}>
+              <b>Kept, but no longer linked here:</b><br />{removePlan.detach.map((x) => x.name).join(', ')}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
+            <button type="button" disabled={busy} onClick={() => setRemovePlan(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+            <button type="button" disabled={busy} onClick={confirmRemove} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: '#d33', color: 'white', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Removing...' : removePlan.action === 'unlink' ? 'Remove link' : 'Yes, delete'}</button>
+          </div>
         </Modal>
       )}
     </div>

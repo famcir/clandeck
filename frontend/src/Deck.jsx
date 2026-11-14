@@ -393,6 +393,7 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [groups, setGroups] = useState([]);
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
+  const [tempLogin, setTempLogin] = useState(false);   // still on a temporary password?
   const [photoUrl, setPhotoUrl] = useState(localStorage.getItem('photo_url') || '');
   const [pos, setPos] = useState(JSON.parse(localStorage.getItem('clandeck_photo_pos') || '{"x":50,"y":50,"zoom":100}'));
   const [profileInfo, setProfileInfo] = useState({
@@ -429,6 +430,7 @@ export default function Deck({ onGoProfile, onLogout }) {
     });
 
     const userId = storedUser?.id || storedUser?.uname || 'self';
+    fetch(`${API_URL}/api/account/status/${encodeURIComponent(userId)}`).then(r => r.json()).then(j => setTempLogin(!!(j && j.is_temp))).catch(() => {});
     fetch(`${API_URL}/api/family?user_id=${userId}`)
       .then(r => r.json())
       .then(j => {
@@ -495,6 +497,13 @@ export default function Deck({ onGoProfile, onLogout }) {
       `}</style>
 
       <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} />
+
+      {tempLogin && (
+        <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
+          <span style={{flex:1, minWidth:200}}>🔑 You are using a <b>temporary login</b>. Please set your own username and password in Profile Edit.</span>
+          <button onClick={onGoProfile} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight:700, fontSize:'11px', cursor:'pointer'}}>Set now</button>
+        </div>
+      )}
 
       <div className="deck-grid">
         <div>
