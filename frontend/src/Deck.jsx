@@ -6,32 +6,47 @@ import mangoBasket from './assets/mango-basket.png';
 const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
 
 // ================= FAMILY TREE (tree view + line view) =================
-
-
-// ---- card / spacing sizes (px) ----
-const CW = 112;          // card width
-const CH = 144;          // card height
-const GAP = 30;          // gap between neighbours
-const COUPLE_GAP = 56;   // gap between a person and a spouse (room for the marriage line)
-const ROW = CH + 84;     // distance from one generation row to the next
-const PAD = 40;          // canvas padding
+// ---- sizes: smaller on phones. IMG = photo size, CW/CH = space one person takes (photo + name + relation) ----
+const DIMS = {
+  desk: { IMG: 60, CW: 96, CH: 118, GAP: 24, COUPLE: 52, ROW: 190, PAD: 30, BUS: 26, TW: 128, TH: 48, EW: 84, TIMG: 34, TRAIL_H: 116 },
+  mob:  { IMG: 44, CW: 72, CH: 96,  GAP: 14, COUPLE: 34, ROW: 154, PAD: 14, BUS: 22, TW: 104, TH: 42, EW: 54, TIMG: 28, TRAIL_H: 100 },
+};
 const LINE = '#b89a6a';
 const LINE_W = 2;
+
+function useDims() {
+  const get = () => (typeof window !== 'undefined' && window.innerWidth < 650 ? DIMS.mob : DIMS.desk);
+  const [d, setD] = useState(get);
+  useEffect(() => {
+    const f = () => setD(get());
+    window.addEventListener('resize', f);
+    return () => window.removeEventListener('resize', f);
+  }, []);
+  return d;
+}
 
 const photoOf = (p) => (p && (p.photo_compressed_url || p.photo_url)) || '';
 const initialOf = (p) => ((p && p.display_name) || '?').trim().charAt(0).toUpperCase();
 
+// same look as the buttons in CommonHeader (bold 12px, tan, dark when active)
+const navBtn = (active, disabled) => ({
+  padding: '7px 16px', borderRadius: '8px', border: '1px solid #d8c5a3', cursor: disabled ? 'default' : 'pointer',
+  fontWeight: 800, fontSize: '12px', fontFamily: 'inherit', background: active ? '#1a1a1a' : '#c9ad83', color: 'white',
+  boxShadow: active ? '0 2px 6px rgba(0,0,0,0.15)' : 'none', opacity: disabled ? 0.45 : 1, transition: 'all 0.2s',
+});
+
 /**
- * Works out where every card goes and which lines join them.
+ * Works out where every person goes and which lines join them. Lines start and end at the PHOTOS.
  *
- *            [Father]==[Mother]
- *                  |
+ *            (Father)──(Mother)
+ *                  │
  *        ┌─────────┴─────────┐
- *   [Sibling]   [ ME ]━━━[Spouse 1]   [Spouse 2]
+ *   (Sibling)   ( ME )──(Spouse 1)   (Spouse 2)
  *                  └────┬────┘
- *                   [Child] [Child]       <- centred under ME + that spouse
+ *                   (Child) (Child)       <- centred under ME + that spouse
  */
-function buildLayout(me, fam) {
+function buildLayout(me, fam, D) {
+  const { IMG, CW, CH, GAP, COUPLE, ROW, PAD, BUS } = D;
   const father = fam.father || null;
   const mother = fam.mother || null;
   const siblings = fam.siblings || [];
@@ -39,10 +54,12 @@ function buildLayout(me, fam) {
   const children = fam.children || [];
   const hasParents = !!(father || mother);
 
-  const nodes = [];   // {p, x, y, rel, center}
-  const lines = [];   // {d}  svg path strings
-  const dots = [];    // {x, y}
+  const nodes = [];
+  const lines = [];
+  const dots = [];
   const L = (x1, y1, x2, y2) => lines.push(`M${x1} ${y1} L${x2} ${y2}`);
+  const imgL = (x) => x + (CW - IMG) / 2;
+  const imgR = (x) => x + (CW + IMG) / 2;
 
   const y1 = hasParents ? ROW : 0;      // middle row (me, siblings, spouses)
   const y0 = 0;                         // parents row
@@ -53,33 +70,33 @@ function buildLayout(me, fam) {
   const mid = [];
   siblings.forEach((s, i) => {
     mid.push({ p: s, x, rel: 'Sibling' });
-    x += CW + (i === siblings.length - 1 ? GAP + 14 : GAP);
+    x += CW + (i === siblings.length - 1 ? GAP + 10 : GAP);
   });
   const meX = x;
   mid.push({ p: me, x: meX, rel: 'Self', center: true });
   x += CW;
   const spouseNodes = [];
   spouses.forEach((s, i) => {
-    x += i === 0 ? COUPLE_GAP : GAP;
+    x += i === 0 ? COUPLE : GAP;
     const n = { p: s, x, rel: 'Spouse' };
     mid.push(n); spouseNodes.push(n);
     x += CW;
   });
   const meCx = meX + CW / 2;
-  const midY = y1 + CH / 2;
+  const midY = y1 + IMG / 2;
 
   // ---- marriage lines ----
-  const anchors = [];   // where each spouse's children hang from {x, y}
+  const anchors = [];   // where each spouse's children hang from
   spouseNodes.forEach((n, i) => {
     const spCx = n.x + CW / 2;
     if (i === 0) {
-      L(meX + CW, midY, n.x, midY);
+      L(imgR(meX), midY, imgL(n.x), midY);
       anchors.push({ x: (meCx + spCx) / 2, y: midY });
     } else {
-      const depth = y1 + CH + 16 * i;          // run underneath the cards
-      lines.push(`M${meCx} ${y1 + CH} L${meCx} ${depth} L${spCx} ${depth} L${spCx} ${y1 + CH}`);
+      const depth = y1 + CH + 8 * i;                   // runs underneath the names
+      lines.push(`M${meCx} ${y1 + IMG} L${meCx} ${depth} L${spCx} ${depth} L${spCx} ${y1 + IMG}`);
       anchors.push({ x: (meCx + spCx) / 2, y: depth });
-      dots.push({ x: meCx, y: y1 + CH });
+      dots.push({ x: meCx, y: y1 + IMG });
     }
   });
 
@@ -89,22 +106,23 @@ function buildLayout(me, fam) {
   if (hasParents) {
     const pCx = (Math.min(...sibCxs) + Math.max(...sibCxs)) / 2;
     const both = father && mother;
-    const pw = both ? CW * 2 + COUPLE_GAP : CW;
+    const pw = both ? CW * 2 + COUPLE : CW;
     const px = pCx - pw / 2;
     parentsMinX = px; parentsMaxX = px + pw;
-    let dropX, dropY;
+    let dropY;
     if (both) {
+      const mx = px + CW + COUPLE;
       nodes.push({ p: father, x: px, y: y0, rel: 'Father' });
-      nodes.push({ p: mother, x: px + CW + COUPLE_GAP, y: y0, rel: 'Mother' });
-      L(px + CW, y0 + CH / 2, px + CW + COUPLE_GAP, y0 + CH / 2);
-      dropX = pCx; dropY = y0 + CH / 2;
+      nodes.push({ p: mother, x: mx, y: y0, rel: 'Mother' });
+      L(imgR(px), y0 + IMG / 2, imgL(mx), y0 + IMG / 2);
+      dropY = y0 + IMG / 2;
     } else {
       nodes.push({ p: father || mother, x: px, y: y0, rel: father ? 'Father' : 'Mother' });
-      dropX = pCx; dropY = y0 + CH;
+      dropY = y0 + IMG;
     }
-    const bus = y1 - 34;
-    L(dropX, dropY, dropX, bus);
-    const bl = Math.min(...sibCxs, dropX), br = Math.max(...sibCxs, dropX);
+    const bus = y1 - BUS;
+    L(pCx, dropY, pCx, bus);
+    const bl = Math.min(...sibCxs, pCx), br = Math.max(...sibCxs, pCx);
     if (br > bl) L(bl, bus, br, bus);
     sibCxs.forEach((cx) => L(cx, bus, cx, y1));
   }
@@ -120,10 +138,11 @@ function buildLayout(me, fam) {
   });
   if (loose.length) {
     if (groups.length === 1) groups[0].kids.push(...loose);
-    else groups.push({ anchor: { x: meCx, y: y1 + CH }, kids: loose });
+    else groups.push({ anchor: { x: meCx, y: y1 + IMG }, kids: loose });
   }
   const active = groups.filter((g) => g.kids.length).sort((a, b) => a.anchor.x - b.anchor.x);
   let prevRight = -Infinity, childMin = Infinity, childMax = -Infinity;
+  const prevSpans = [];
   active.forEach((g) => {
     const w = g.kids.length * CW + (g.kids.length - 1) * GAP;
     let left = g.anchor.x - w / 2;
@@ -135,26 +154,27 @@ function buildLayout(me, fam) {
       nodes.push({ p: k, x: kx, y: y2, rel: 'Child' });
       return kx + CW / 2;
     });
-    const bus = y2 - 34;
+    // if this family's line would drop straight onto another family's children, run it one level higher
+    const clash = prevSpans.some((sp) => g.anchor.x >= sp.a - 4 && g.anchor.x <= sp.b + 4);
+    const bus = y2 - BUS - (clash ? 14 : 0);
     L(g.anchor.x, g.anchor.y, g.anchor.x, bus);
     const bl = Math.min(...cxs, g.anchor.x), br = Math.max(...cxs, g.anchor.x);
     if (br > bl) L(bl, bus, br, bus);
     cxs.forEach((cx) => L(cx, bus, cx, y2));
+    prevSpans.push({ a: cxs[0], b: cxs[cxs.length - 1] });
   });
 
-  // ---- shift everything so the canvas starts at PAD ----
-  // make the selected person the exact horizontal middle of the canvas
+  // ---- make the selected person the exact horizontal middle of the canvas ----
   const minX0 = Math.min(0, parentsMinX, childMin);
   const maxX0 = Math.max(x, parentsMaxX, childMax);
   const span = Math.max(meCx - minX0, maxX0 - meCx);
   const minX = meCx - span, maxX = meCx + span;
   const dx = PAD - minX;
   const dy = PAD;
-  const shiftedNodes = nodes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }));
   const shiftPath = (d) => d.replace(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g, (_, a, b) => `${+a + dx} ${+b + dy}`);
   const bottom = (active.length ? y2 : y1) + CH;
   return {
-    nodes: shiftedNodes,
+    nodes: nodes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy })),
     paths: lines.map(shiftPath),
     dots: dots.map((d) => ({ x: d.x + dx, y: d.y + dy })),
     width: maxX - minX + PAD * 2,
@@ -163,48 +183,49 @@ function buildLayout(me, fam) {
   };
 }
 
-function Card({ node, isLogin, onPick }) {
+// one person in the tree: just the photo, name and relation (no box). Photo zooms up while the mouse is on it.
+function Person({ node, D, isLogin, onPick }) {
   const { p, rel, center } = node;
   const [imgOk, setImgOk] = useState(true);
+  const [hover, setHover] = useState(false);
   const src = photoOf(p);
+  const label = rel === 'Self' ? (isLogin ? 'You' : 'Selected') : rel + (isLogin ? ' • You' : '');
   return (
     <button
       type="button"
       onClick={() => !center && onPick(p, rel)}
       title={center ? p.display_name : `Open ${p.display_name}'s family`}
       style={{
-        position: 'absolute', left: node.x, top: node.y, width: CW, height: CH,
-        padding: 8, border: center ? '2px solid #111' : '1px solid #e3d3b3',
-        background: center ? '#fffaf0' : '#fff', borderRadius: 14,
-        boxShadow: center ? '0 6px 18px rgba(0,0,0,.18)' : '0 2px 6px rgba(0,0,0,.07)',
-        cursor: center ? 'default' : 'pointer', textAlign: 'center', font: 'inherit',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'transform .15s, box-shadow .15s',
+        position: 'absolute', left: node.x, top: node.y, width: D.CW, height: D.CH, padding: 0, border: 'none', background: 'none',
+        font: 'inherit', cursor: center ? 'default' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center',
+        zIndex: hover ? 20 : 1,
       }}
-      onMouseEnter={(e) => { if (!center) { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,.15)'; } }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = center ? '0 6px 18px rgba(0,0,0,.18)' : '0 2px 6px rgba(0,0,0,.07)'; }}
     >
-      <div style={{ width: 72, height: 72, borderRadius: 14, overflow: 'hidden', background: '#e8d5b0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, color: '#5a4524', flexShrink: 0 }}>
-        {src && imgOk
-          ? <img src={src} alt="" onError={() => setImgOk(false)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : initialOf(p)}
+      <div
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          position: 'relative', zIndex: hover ? 5 : 0,
+          width: D.IMG, height: D.IMG, borderRadius: 12, overflow: 'hidden', background: '#e8d5b0', flexShrink: 0, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: D.IMG * 0.4, color: '#5a4524',
+          border: center ? '3px solid #1a1a1a' : '2px solid #fff',
+          boxShadow: hover ? '0 10px 24px rgba(0,0,0,.35)' : center ? '0 4px 12px rgba(0,0,0,.22)' : '0 1px 4px rgba(0,0,0,.18)',
+          transform: hover ? 'scale(1.75)' : 'none', transformOrigin: 'center', transition: 'transform .18s ease, box-shadow .18s ease',
+        }}
+      >
+        {src && imgOk ? <img src={src} alt="" onError={() => setImgOk(false)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initialOf(p)}
       </div>
-      <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, lineHeight: '16px', height: 32, width: '100%', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word' }}>
+      {/* the white background lets a line pass behind the text instead of through it */}
+      <div style={{ position: 'relative', zIndex: 1, background: 'white', width: '100%', marginTop: 6, fontWeight: 800, fontSize: 12, lineHeight: '15px', maxHeight: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', color: '#1a1a1a' }}>
         {p.display_name}
       </div>
-      <div style={{ marginTop: 'auto', fontSize: 11, color: '#8a7a5c', lineHeight: '14px' }}>
-        {rel === 'Self' ? (isLogin ? 'You' : 'Selected') : rel}{isLogin && rel !== 'Self' ? ' • You' : ''}
-      </div>
+      <div style={{ position: 'relative', zIndex: 1, background: 'white', width: '100%', fontWeight: 800, fontSize: 11, lineHeight: '14px', color: center ? '#1a1a1a' : '#8a7a5c' }}>{label}</div>
     </button>
   );
 }
 
-// ---- line-view (path) sizes ----
-const TW = 132;        // path chip width
-const TH = 56;         // path chip height
-const EW = 92;         // length of a connecting line between two chips
-const TRAIL_H = 130;   // height of the path strip above the tree
-
-function Chip({ item, p, index, isLast, isLogin, x, onJump }) {
+// one step of the path in Line view
+function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
   const [imgOk, setImgOk] = useState(true);
   const src = photoOf(p);
   const sub = index === 0 ? 'You' : isLast ? 'Showing' : item.rel;
@@ -215,19 +236,19 @@ function Chip({ item, p, index, isLast, isLogin, x, onJump }) {
       onClick={() => onJump(index)}
       title={isLast ? '' : `Go back to ${p ? p.display_name : ''}`}
       style={{
-        position: 'absolute', left: x - TW / 2, top: 16, width: TW, height: TH, padding: 6, boxSizing: 'border-box',
-        display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left', font: 'inherit', color: '#111',
-        background: isLast ? '#fffaf0' : '#fff', border: isLast ? '2px solid #111' : '1px solid #e3d3b3',
-        borderRadius: 12, cursor: isLast ? 'default' : 'pointer',
-        boxShadow: isLast ? '0 4px 12px rgba(0,0,0,.18)' : '0 2px 5px rgba(0,0,0,.07)',
+        position: 'absolute', left: x - D.TW / 2, top: 14, width: D.TW, height: D.TH, padding: 5, boxSizing: 'border-box',
+        display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left', font: 'inherit', color: '#1a1a1a',
+        background: isLast ? '#fffaf0' : '#fff', border: isLast ? '2px solid #1a1a1a' : '1px solid #e3d3b3',
+        borderRadius: 10, cursor: isLast ? 'default' : 'pointer',
+        boxShadow: isLast ? '0 4px 12px rgba(0,0,0,.18)' : '0 1px 4px rgba(0,0,0,.08)',
       }}
     >
-      <div style={{ width: 38, height: 38, borderRadius: 9, overflow: 'hidden', background: '#e8d5b0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#5a4524', flexShrink: 0 }}>
+      <div style={{ width: D.TIMG, height: D.TIMG, borderRadius: 8, overflow: 'hidden', background: '#e8d5b0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13, color: '#5a4524', flexShrink: 0 }}>
         {src && imgOk ? <img src={src} alt="" onError={() => setImgOk(false)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initialOf(p)}
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p ? p.display_name : '…'}</div>
-        <div style={{ fontSize: 10, color: '#8a7a5c', lineHeight: '13px' }}>{sub}{isLogin && index !== 0 ? ' • You' : ''}</div>
+        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p ? p.display_name : '…'}</div>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#8a7a5c', lineHeight: '13px' }}>{sub}{isLogin && index !== 0 ? ' • You' : ''}</div>
       </div>
     </button>
   );
@@ -243,6 +264,7 @@ function Chip({ item, p, index, isLast, isLogin, x, onJump }) {
  *    (You → Father → Father's sibling → ...). Click any earlier person on the path to jump back to them.
  */
 function FamilyTree({ userId, onFocus }) {
+  const D = useDims();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('clandeck_tree_view') === 'line' ? 'line' : 'tree'; } catch { return 'tree'; }
   });
@@ -280,13 +302,13 @@ function FamilyTree({ userId, onFocus }) {
 
   const chooseView = (v) => { setView(v); try { localStorage.setItem('clandeck_tree_view', v); } catch { /* ignore */ } };
 
-  const layout = useMemo(() => (data ? buildLayout(data.myProfile, data.family || {}) : null), [data]);
+  const layout = useMemo(() => (data ? buildLayout(data.myProfile, data.family || {}, D) : null), [data, D]);
 
   const lineMode = view === 'line';
   const T = trail.length;
-  const trailLeft = (T - 1) * (TW + EW) + TW / 2;
-  const trailH = lineMode ? TRAIL_H : 0;
-  const W = layout ? (lineMode ? Math.max(layout.width, 2 * (trailLeft + PAD)) : layout.width) : 0;
+  const trailLeft = (T - 1) * (D.TW + D.EW) + D.TW / 2;
+  const trailH = lineMode ? D.TRAIL_H : 0;
+  const W = layout ? (lineMode ? Math.max(layout.width, 2 * (trailLeft + D.PAD)) : layout.width) : 0;
 
   // keep the selected person in the horizontal middle of the view
   useLayoutEffect(() => {
@@ -295,7 +317,7 @@ function FamilyTree({ userId, onFocus }) {
   }, [layout, W]);
 
   // cards pass (person, relation); a person already on the path just jumps back to that point, so it never loops
-  const pickWithRel = useCallback((p, rel) => {
+  const pick = useCallback((p, rel) => {
     setTrail((t) => {
       const idx = t.findIndex((x, i) => x.id === p.id || (x.p && x.p.id === p.id) || (i === 0 && home && home.id === p.id));
       if (idx >= 0) return t.slice(0, idx + 1);
@@ -307,28 +329,24 @@ function FamilyTree({ userId, onFocus }) {
   const back = () => setTrail((t) => (t.length > 1 ? t.slice(0, -1) : t));
   const goHome = () => setTrail((t) => t.slice(0, 1));
 
-  const btn = { padding: '7px 14px', borderRadius: 999, border: '1px solid #d9c49b', background: '#fff', cursor: 'pointer', font: 'inherit', fontSize: 13, fontWeight: 600 };
-  const seg = (on) => ({ ...btn, borderRadius: 0, border: '1px solid #d9c49b', background: on ? '#111' : '#fff', color: on ? '#fff' : '#111' });
-  const chipY = 16 + TH / 2;
-  const cxOf = (i) => W / 2 - (T - 1 - i) * (TW + EW);
+  const chipY = 14 + D.TH / 2;
+  const cxOf = (i) => W / 2 - (T - 1 - i) * (D.TW + D.EW);
   const profileOf = (item, i) => item.p || (i === 0 ? home : null);
 
   return (
-    <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 16px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'inline-flex' }}>
-          <button type="button" onClick={() => chooseView('tree')} style={{ ...seg(!lineMode), borderRadius: '999px 0 0 999px' }}>🌳 Tree view</button>
-          <button type="button" onClick={() => chooseView('line')} style={{ ...seg(lineMode), borderRadius: '0 999px 999px 0', borderLeft: 'none' }}>➖ Line view</button>
-        </div>
-        <button type="button" style={{ ...btn, opacity: atHome ? 0.4 : 1 }} disabled={atHome} onClick={back}>← Back</button>
-        <button type="button" style={{ ...btn, opacity: atHome ? 0.4 : 1 }} disabled={atHome} onClick={goHome}>⌂ My tree</button>
-        <span style={{ fontSize: 13, color: '#8a7a5c' }}>
-          {data ? <>Showing <b style={{ color: '#111' }}>{data.myProfile.display_name}</b>{atHome ? '' : "'s family"} · click anyone to open their tree</> : ''}
+    <div style={{ width: '100%', fontFamily: 'inherit' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 14px', flexWrap: 'wrap' }}>
+        <button type="button" onClick={() => chooseView('tree')} style={navBtn(!lineMode)}>🌳 Tree view</button>
+        <button type="button" onClick={() => chooseView('line')} style={navBtn(lineMode)}>➖ Line view</button>
+        <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={back}>← Back</button>
+        <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={goHome}>⌂ My tree</button>
+        <span style={{ fontSize: 12, fontWeight: 800, color: '#8a7a5c' }}>
+          {data ? <>Showing <span style={{ color: '#1a1a1a' }}>{data.myProfile.display_name}</span>{atHome ? '' : "'s family"} · tap anyone to open their tree</> : ''}
         </span>
       </div>
 
-      {error && <div style={{ padding: 16, color: '#b00020' }}>{error}</div>}
-      {loading && !data && <div style={{ padding: 24, color: '#8a7a5c' }}>Loading family tree…</div>}
+      {error && <div style={{ padding: 16, color: '#b00020', fontWeight: 800, fontSize: 12 }}>{error}</div>}
+      {loading && !data && <div style={{ padding: 24, color: '#8a7a5c', fontWeight: 800, fontSize: 12 }}>Loading family tree…</div>}
 
       {layout && (
         <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'hidden', opacity: loading ? 0.5 : 1, transition: 'opacity .15s' }}>
@@ -339,28 +357,28 @@ function FamilyTree({ userId, onFocus }) {
                 <svg width={W} height={trailH} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}>
                   {trail.slice(1).map((item, k) => {
                     const i = k + 1;
-                    const x1 = cxOf(i - 1) + TW / 2, x2 = cxOf(i) - TW / 2;
+                    const x1 = cxOf(i - 1) + D.TW / 2, x2 = cxOf(i) - D.TW / 2;
                     return (
                       <g key={i}>
                         <path d={`M${x1} ${chipY} L${x2 - 2} ${chipY}`} stroke={LINE} strokeWidth={LINE_W} />
-                        <path d={`M${x2} ${chipY} l-8 -5 l0 10 z`} fill={LINE} />
+                        <path d={`M${x2} ${chipY} l-7 -4.5 l0 9 z`} fill={LINE} />
                       </g>
                     );
                   })}
-                  <path d={`M${W / 2} ${16 + TH} L${W / 2} ${trailH - 4}`} stroke={LINE} strokeWidth={LINE_W} strokeDasharray="4 4" />
+                  <path d={`M${W / 2} ${14 + D.TH} L${W / 2} ${trailH - 4}`} stroke={LINE} strokeWidth={LINE_W} strokeDasharray="4 4" />
                   <path d={`M${W / 2} ${trailH} l-5 -8 l10 0 z`} fill={LINE} />
                 </svg>
                 {trail.slice(1).map((item, k) => {
                   const i = k + 1;
-                  const mx = (cxOf(i - 1) + TW / 2 + cxOf(i) - TW / 2) / 2;
+                  const mx = (cxOf(i - 1) + D.TW / 2 + cxOf(i) - D.TW / 2) / 2;
                   return (
-                    <span key={'l' + i} style={{ position: 'absolute', left: mx - 40, width: 80, top: chipY - 22, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#8a7a5c' }}>
+                    <span key={'l' + i} style={{ position: 'absolute', left: mx - 36, width: 72, top: chipY - 20, textAlign: 'center', fontSize: 11, fontWeight: 800, color: '#8a7a5c' }}>
                       {item.rel}
                     </span>
                   );
                 })}
                 {trail.map((item, i) => (
-                  <Chip key={item.id + i} item={item} p={profileOf(item, i)} index={i} isLast={i === T - 1}
+                  <Chip key={item.id + i} item={item} p={profileOf(item, i)} index={i} isLast={i === T - 1} D={D}
                     isLogin={!!myProfileId && profileOf(item, i) && profileOf(item, i).id === myProfileId}
                     x={cxOf(i)} onJump={jump} />
                 ))}
@@ -372,14 +390,62 @@ function FamilyTree({ userId, onFocus }) {
                 {layout.paths.map((d, i) => (
                   <path key={i} d={d} fill="none" stroke={LINE} strokeWidth={LINE_W} strokeLinecap="round" strokeLinejoin="round" />
                 ))}
-                {layout.dots.map((d, i) => <circle key={i} cx={d.x} cy={d.y} r={3.5} fill={LINE} />)}
+                {layout.dots.map((d, i) => <circle key={i} cx={d.x} cy={d.y} r={3} fill={LINE} />)}
               </svg>
               {layout.nodes.map((n) => (
-                <Card key={n.p.id + n.rel} node={n} isLogin={!!myProfileId && n.p.id === myProfileId} onPick={pickWithRel} />
+                <Person key={n.p.id + n.rel} node={n} D={D} isLogin={!!myProfileId && n.p.id === myProfileId} onPick={pick} />
               ))}
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ================= AD SLOTS =================
+// Shows a labelled empty box until real ads are switched on. To go live, put these in the frontend .env.production
+// (Google AdSense) and rebuild:  VITE_ADSENSE_CLIENT=ca-pub-XXXXXXXXXXXXXXXX
+//                                VITE_ADSENSE_SLOT_BANNER=<slot id of the thin banner>
+//                                VITE_ADSENSE_SLOT_SQUARE=<slot id of the square ad>
+// To hide the empty boxes until then, add  VITE_HIDE_AD_PLACEHOLDERS=1
+// only real-looking AdSense values switch ads on (so example text like ca-pub-XXXX or ... is ignored)
+const adClient = String(import.meta.env.VITE_ADSENSE_CLIENT || '').trim();
+const adSlot = (v) => (/^\d{6,}$/.test(String(v || '').trim()) ? String(v).trim() : '');
+const ADS = {
+  client: /^ca-pub-\d{10,}$/.test(adClient) ? adClient : '',
+  banner: adSlot(import.meta.env.VITE_ADSENSE_SLOT_BANNER),
+  square: adSlot(import.meta.env.VITE_ADSENSE_SLOT_SQUARE),
+  hidePlaceholder: import.meta.env.VITE_HIDE_AD_PLACEHOLDERS === '1',
+};
+
+function AdSlot({ kind, style }) {
+  const slotId = ADS[kind];
+  const live = !!(ADS.client && slotId);
+  const isBanner = kind === 'banner';
+  useEffect(() => {
+    if (!live) return;
+    try {
+      if (!document.querySelector('script[data-clandeck-ads]')) {
+        const sc = document.createElement('script');
+        sc.async = true; sc.crossOrigin = 'anonymous'; sc.setAttribute('data-clandeck-ads', '1');
+        sc.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADS.client}`;
+        document.head.appendChild(sc);
+      }
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    } catch { /* ads must never break the page */ }
+  }, [live]);
+  if (!live && ADS.hidePlaceholder) return null;
+  const box = isBanner ? { width: '100%', height: 'clamp(50px, 6vw, 80px)' } : { width: '100%', maxWidth: 300, aspectRatio: '1 / 1' };
+  return (
+    <div aria-label="Advertisement" style={{ ...box, boxSizing: 'border-box', overflow: 'hidden', borderRadius: 14, border: live ? 'none' : '1px dashed #d8c5a3', background: live ? 'transparent' : '#fffefb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', ...style }}>
+      {live ? (
+        <ins className="adsbygoogle" style={{ display: 'block', width: '100%', height: '100%' }} data-ad-client={ADS.client} data-ad-slot={slotId} data-ad-format={isBanner ? 'horizontal' : 'rectangle'} data-full-width-responsive={isBanner ? 'true' : 'false'} />
+      ) : (
+        <>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: '#b8a98a' }}>ADVERTISEMENT</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: '#c9bb9d', marginTop: 2 }}>{isBanner ? 'Banner ad space' : 'Square ad space'}</span>
+        </>
       )}
     </div>
   );
@@ -534,6 +600,7 @@ export default function Deck({ onGoProfile, onLogout }) {
         </div>
 
         <div style={{minWidth:0}}>
+          <div style={{marginBottom:'12px'}}><AdSlot kind="banner" /></div>
           {privacy.showFamilyTree!==false ? (
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
@@ -552,6 +619,7 @@ export default function Deck({ onGoProfile, onLogout }) {
               g && <div key={g.id} style={{padding:'8px', border:'1px solid #f0e0c0', borderRadius:'8px', marginBottom:'6px', fontSize:'12px'}}><strong>{g.name}</strong><br/><span style={{color:'#888'}}>{g.members?.length || 0} members</span></div>
             ))}
           </div>
+          <div style={{marginTop:'16px'}}><AdSlot kind="square" /></div>
         </div>
       </div>
 
