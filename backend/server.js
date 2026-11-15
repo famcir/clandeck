@@ -333,7 +333,8 @@ app.get('/api/profiles/search', async (req, res) => {
       const u = p.photo_compressed_url || p.photo_url || '';
       return u.startsWith('blob:') || u.startsWith('data:') ? '' : u;
     };
-    const data = rows.filter((p) => !linked.has(p.id)).slice(0, 10).map((p) => ({
+    const keepLinked = String(req.query.include_linked || '') === '1';
+    const data = rows.filter((p) => keepLinked || !linked.has(p.id)).slice(0, 10).map((p) => ({
       id: p.id, display_name: p.display_name, nickname: p.nickname || '', gender: p.gender || '',
       location: p.location || '', is_claimed: p.is_claimed ? 1 : 0, mine: p.owner_user_id === me.owner_user_id ? 1 : 0,
       photo: photo(p), exact: (p.email && p.email.toLowerCase() === q.toLowerCase()) || p.mobile_number === q ? 1 : 0,
@@ -343,6 +344,293 @@ app.get('/api/profiles/search', async (req, res) => {
     console.error('search error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// GROUPS: My Friends (made automatically), school, college and custom groups.
+//   * a group belongs to the person who made it; the members are ordinary profiles
+//   * removing someone from a group only removes them from the group (their profile stays)
+//   * a person you created only for a group, with no family links and no login, is cleaned up when you remove them
+// ---------------------------------------------------------------------------------------------
+const GROUP_KINDS = ['friends', 'school', 'college', 'custom'];
+const groupsReady = (async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS profile_groups (
+      id VARCHAR(36) NOT NULL PRIMARY KEY,
+      owner_profile_id VARCHAR(36) NOT NULL,
+      name VARCHAR(80) NOT NULL,
+      kind VARCHAR(20) NOT NULL DEFAULT 'custom',
+      is_default TINYINT NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (owner_profile_id, name)
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS profile_group_members (
+      id VARCHAR(36) NOT NULL PRIMARY KEY,
+      group_id VARCHAR(36) NOT NULL,
+      profile_id VARCHAR(36) NOT NULL,
+      added_by VARCHAR(36) NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (group_id, profile_id)
+    )`);
+    // 'private' = only me, 'family' = my relatives can find these people when they search (added later, so also patched in)
+    try { await pool.query(`ALTER TABLE profile_groups ADD COLUMN visibility VARCHAR(10) NOT NULL DEFAULT 'private'`); } catch { /* already there */ }
+    for (const ix of [`CREATE INDEX idx_pgm_profile ON profile_group_members (profile_id)`]) { try { await pool.query(ix); } catch { /* already there */ } }
+  } catch (e) { console.error('group tables:', e.message); }
+})();
+
+const groupHome = async (ref) => {
+  const [r] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [ref, ref, ref]);
+  return r[0] || null;
+};
+const cleanPhoto = (p) => { const u = p.photo_compressed_url || p.photo_url || ''; return u.startsWith('blob:') || u.startsWith('data:') ? '' : u; };
+const groupMemberOut = (p) => ({ id: p.id, display_name: p.display_name, nickname: p.nickname || '', gender: p.gender || '', photo_url: cleanPhoto(p), is_claimed: p.is_claimed ? 1 : 0, owner_user_id: p.owner_user_id });
+
+const loadGroups = async (home) => {
+  await groupsReady;
+  let [gs] = await pool.query(`SELECT * FROM profile_groups WHERE owner_profile_id = ? ORDER BY is_default DESC, created_at, name`, [home.id]);
+  if (!gs.some((g) => g.is_default)) {
+    try {
+      await pool.query(`INSERT INTO profile_groups (id, owner_profile_id, name, kind, is_default) VALUES (UUID(), ?, 'My Friends', 'friends', 1)`, [home.id]);
+    } catch { /* made by a parallel request */ }
+    [gs] = await pool.query(`SELECT * FROM profile_groups WHERE owner_profile_id = ? ORDER BY is_default DESC, created_at, name`, [home.id]);
+  }
+  const ids = gs.map((g) => g.id);
+  const byGroup = new Map(ids.map((i) => [i, []]));
+  if (ids.length) {
+    const [ms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE group_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at, id`, ids);
+    const pids = [...new Set(ms.map((m) => m.profile_id))];
+    const pmap = new Map();
+    if (pids.length) {
+      const [ps] = await pool.query(`SELECT id, display_name, nickname, gender, photo_compressed_url, photo_url, is_claimed, owner_user_id FROM profiles WHERE id IN (${pids.map(() => '?').join(',')})`, pids);
+      ps.forEach((p) => pmap.set(p.id, p));
+    }
+    ms.forEach((m) => { const p = pmap.get(m.profile_id); if (p) byGroup.get(m.group_id).push(groupMemberOut(p)); });
+  }
+  return gs.map((g) => ({ id: g.id, name: g.name, kind: g.kind, is_default: g.is_default ? 1 : 0, visibility: g.visibility === 'family' ? 'family' : 'private', members: byGroup.get(g.id) }));
+};
+
+// a person made only for a group: no login, no family links, not in any other group -> remove the profile too
+const dropOrphan = async (pid, home) => {
+  const [pr] = await pool.query(`SELECT id, is_claimed, owner_user_id FROM profiles WHERE id = ? LIMIT 1`, [pid]);
+  const P = pr[0];
+  if (!P || P.is_claimed || P.owner_user_id !== home.owner_user_id) return;
+  const [u] = await pool.query(`SELECT id FROM users WHERE id = ? LIMIT 1`, [pid]);
+  const [g] = await pool.query(`SELECT id FROM profile_group_members WHERE profile_id = ? LIMIT 1`, [pid]);
+  const [r] = await pool.query(`SELECT id FROM profile_relations WHERE owner_profile_id = ? OR related_profile_id = ? LIMIT 1`, [pid, pid]);
+  const [c] = await pool.query(`SELECT id FROM profiles WHERE father_id = ? OR mother_id = ? LIMIT 1`, [pid, pid]);
+  if (!u.length && !g.length && !r.length && !c.length) await pool.query(`DELETE FROM profiles WHERE id = ?`, [pid]);
+};
+
+app.get('/api/groups', async (req, res) => {
+  try {
+    const home = await groupHome(String(req.query.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    res.json({ success: true, data: await loadGroups(home) });
+  } catch (e) { console.error('groups error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/groups', async (req, res) => {
+  try {
+    await groupsReady;
+    const home = await groupHome(String((req.body || {}).home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const name = String((req.body || {}).name || '').trim().replace(/\s+/g, ' ');
+    const kind = GROUP_KINDS.includes((req.body || {}).kind) ? req.body.kind : 'custom';
+    if (!name) return res.status(400).json({ success: false, error: 'Please type a group name' });
+    if (name.length > 60) return res.status(400).json({ success: false, error: 'Group name is too long (60 letters at most)' });
+    const [cnt] = await pool.query(`SELECT COUNT(*) AS n FROM profile_groups WHERE owner_profile_id = ?`, [home.id]);
+    if (Number(cnt[0].n) >= 30) return res.status(400).json({ success: false, error: 'You can have up to 30 groups' });
+    const [same] = await pool.query(`SELECT id FROM profile_groups WHERE owner_profile_id = ? AND LOWER(name) = LOWER(?) LIMIT 1`, [home.id, name]);
+    if (same.length) return res.status(409).json({ success: false, error: 'You already have a group with that name' });
+    try {
+      await pool.query(`INSERT INTO profile_groups (id, owner_profile_id, name, kind, is_default) VALUES (UUID(), ?, ?, ?, 0)`, [home.id, name, kind]);
+    } catch { return res.status(409).json({ success: false, error: 'You already have a group with that name' }); }
+    res.json({ success: true, data: await loadGroups(home) });
+  } catch (e) { console.error('group create error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// body: home_id, name  (the default My Friends group keeps its name)
+app.post('/api/groups/:id/rename', async (req, res) => {
+  try {
+    await groupsReady;
+    const home = await groupHome(String((req.body || {}).home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [g] = await pool.query(`SELECT * FROM profile_groups WHERE id = ? AND owner_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
+    if (!g.length) return res.status(404).json({ success: false, error: 'Group not found' });
+    if (g[0].is_default) return res.status(400).json({ success: false, error: 'The My Friends group cannot be renamed' });
+    const name = String((req.body || {}).name || '').trim().replace(/\s+/g, ' ');
+    if (!name || name.length > 60) return res.status(400).json({ success: false, error: 'Please type a group name (60 letters at most)' });
+    const [same] = await pool.query(`SELECT id FROM profile_groups WHERE owner_profile_id = ? AND LOWER(name) = LOWER(?) AND id <> ? LIMIT 1`, [home.id, name, g[0].id]);
+    if (same.length) return res.status(409).json({ success: false, error: 'You already have a group with that name' });
+    try { await pool.query(`UPDATE profile_groups SET name = ? WHERE id = ?`, [name, g[0].id]); }
+    catch { return res.status(409).json({ success: false, error: 'You already have a group with that name' }); }
+    res.json({ success: true, data: await loadGroups(home) });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// body: home_id  (members are only taken out of the group; people you made just for it are cleaned up)
+app.post('/api/groups/:id/delete', async (req, res) => {
+  try {
+    await groupsReady;
+    const home = await groupHome(String((req.body || {}).home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [g] = await pool.query(`SELECT * FROM profile_groups WHERE id = ? AND owner_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
+    if (!g.length) return res.status(404).json({ success: false, error: 'Group not found' });
+    if (g[0].is_default) return res.status(400).json({ success: false, error: 'The My Friends group cannot be deleted' });
+    const [ms] = await pool.query(`SELECT profile_id FROM profile_group_members WHERE group_id = ?`, [g[0].id]);
+    await pool.query(`DELETE FROM profile_group_members WHERE group_id = ?`, [g[0].id]);
+    await pool.query(`DELETE FROM profile_groups WHERE id = ?`, [g[0].id]);
+    for (const m of ms) await dropOrphan(m.profile_id, home);
+    res.json({ success: true, data: await loadGroups(home) });
+  } catch (e) { console.error('group delete error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// body: home_id + EITHER profile_id (someone already on ClanDeck) OR display_name (+ gender) to make a new person
+app.post('/api/groups/:id/members', async (req, res) => {
+  try {
+    await groupsReady;
+    const b = req.body || {};
+    const home = await groupHome(String(b.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [g] = await pool.query(`SELECT * FROM profile_groups WHERE id = ? AND owner_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
+    if (!g.length) return res.status(404).json({ success: false, error: 'Group not found' });
+    const [cnt] = await pool.query(`SELECT COUNT(*) AS n FROM profile_group_members WHERE group_id = ?`, [g[0].id]);
+    if (Number(cnt[0].n) >= 500) return res.status(400).json({ success: false, error: 'A group can have up to 500 members' });
+
+    let pid;
+    if (b.profile_id) {
+      const [pr] = await pool.query(`SELECT id, owner_user_id, is_claimed, visibility FROM profiles WHERE id = ? LIMIT 1`, [b.profile_id]);
+      const P = pr[0];
+      if (!P) return res.status(404).json({ success: false, error: 'Person not found' });
+      if (P.id === home.id) return res.status(400).json({ success: false, error: 'That is you' });
+      const mine = P.owner_user_id === home.owner_user_id;
+      const open = P.is_claimed && String(P.visibility || 'public').toLowerCase() !== 'private';
+      if (!mine && !open) return res.status(403).json({ success: false, error: 'That profile is private' });
+      pid = P.id;
+    } else {
+      const name = String(b.display_name || '').trim().replace(/\s+/g, ' ');
+      if (!name) return res.status(400).json({ success: false, error: 'Please type a name' });
+      if (name.length > 80) return res.status(400).json({ success: false, error: 'That name is too long' });
+      const gender = b.gender === 'Female' ? 'Female' : 'Male';
+      const [[u]] = await pool.query('SELECT UUID() AS uuid');
+      pid = u.uuid;
+      await pool.query(
+        `INSERT INTO profiles (id, owner_user_id, display_name, gender, show_in_deck, is_claimed, created_by_user_id, created_at) VALUES (?, ?, ?, ?, 1, 0, ?, NOW())`,
+        [pid, home.owner_user_id, name, gender, home.owner_user_id]
+      );
+    }
+    const [dup] = await pool.query(`SELECT id FROM profile_group_members WHERE group_id = ? AND profile_id = ? LIMIT 1`, [g[0].id, pid]);
+    if (dup.length) return res.status(409).json({ success: false, error: 'Already in this group' });
+    await pool.query(`INSERT INTO profile_group_members (id, group_id, profile_id, added_by) VALUES (UUID(), ?, ?, ?)`, [g[0].id, pid, home.id]);
+    res.json({ success: true, added: pid, data: await loadGroups(home) });
+  } catch (e) { console.error('group add member error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// body: home_id, profile_id
+app.post('/api/groups/:id/members/remove', async (req, res) => {
+  try {
+    await groupsReady;
+    const b = req.body || {};
+    const home = await groupHome(String(b.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [g] = await pool.query(`SELECT id FROM profile_groups WHERE id = ? AND owner_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
+    if (!g.length) return res.status(404).json({ success: false, error: 'Group not found' });
+    await pool.query(`DELETE FROM profile_group_members WHERE group_id = ? AND profile_id = ?`, [g[0].id, b.profile_id]);
+    await dropOrphan(b.profile_id, home);
+    res.json({ success: true, data: await loadGroups(home) });
+  } catch (e) { console.error('group remove member error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// body: home_id, visibility ('private' = only me, 'family' = relatives can find these people by searching)
+app.post('/api/groups/:id/visibility', async (req, res) => {
+  try {
+    await groupsReady;
+    const home = await groupHome(String((req.body || {}).home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const v = (req.body || {}).visibility === 'family' ? 'family' : 'private';
+    const [g] = await pool.query(`SELECT id FROM profile_groups WHERE id = ? AND owner_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
+    if (!g.length) return res.status(404).json({ success: false, error: 'Group not found' });
+    await pool.query(`UPDATE profile_groups SET visibility = ? WHERE id = ?`, [v, g[0].id]);
+    res.json({ success: true, data: await loadGroups(home) });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------------------------
+// SEARCH from the header: finds people in your family and people in groups
+//   (your own groups, plus groups your relatives chose to share with their family).
+// Every result carries the path from YOU to that person, so Line view can draw it:
+//   Me > Sister > (College friends) > Arun
+// ---------------------------------------------------------------------------------------------
+app.get('/api/search', async (req, res) => {
+  try {
+    await groupsReady;
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ success: true, data: [] });
+    const home = await groupHome(String(req.query.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const like = `%${q.replace(/[%_\\]/g, '')}%`;
+
+    const fam = await collectFamily(pool, [home.id]);
+    fam.add(home.id);
+    const famIds = [...fam];
+    const ph = (a) => a.map(() => '?').join(',');
+
+    // how everybody in the family connects to me (shortest path through the relation rows)
+    const [rels] = await pool.query(`SELECT owner_profile_id AS a, related_profile_id AS b, relation_type AS t FROM profile_relations WHERE owner_profile_id IN (${ph(famIds)})`, famIds);
+    const adj = new Map();
+    rels.forEach((r) => { if (!adj.has(r.a)) adj.set(r.a, []); adj.get(r.a).push({ id: r.b, t: r.t }); });
+    const prev = new Map([[home.id, null]]);
+    for (let queue = [home.id]; queue.length;) {
+      const next = [];
+      for (const cur of queue) for (const e of adj.get(cur) || []) if (!prev.has(e.id)) { prev.set(e.id, { from: cur, t: e.t }); next.push(e.id); }
+      queue = next;
+    }
+    const pathTo = (id) => { const out = []; for (let c = id; prev.get(c); c = prev.get(c).from) out.unshift({ id: c, rel: prev.get(c).t }); return out; };
+
+    // 1) relatives whose name matches
+    const [famHits] = await pool.query(
+      `SELECT id FROM profiles WHERE id IN (${ph(famIds)}) AND id <> ? AND (display_name LIKE ? OR nickname LIKE ?) LIMIT 40`, [...famIds, home.id, like, like]);
+    const hits = new Map();   // person id -> { kind, path:[{id,rel}], group?, owner? }
+    famHits.forEach((r) => { if (prev.has(r.id)) hits.set(r.id, { kind: 'family', path: pathTo(r.id) }); });
+
+    // 2) people in groups (mine, or shared with the family by a relative)
+    const [named] = await pool.query(`SELECT id, is_claimed, visibility, owner_user_id FROM profiles WHERE (display_name LIKE ? OR nickname LIKE ?) AND id <> ? LIMIT 200`, [like, like, home.id]);
+    const namedMap = new Map(named.map((p) => [p.id, p]));
+    if (named.length) {
+      const [ms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE profile_id IN (${ph(named)})`, named.map((p) => p.id));
+      const gids = [...new Set(ms.map((m) => m.group_id))];
+      if (gids.length) {
+        const [gs] = await pool.query(`SELECT id, name, owner_profile_id, visibility FROM profile_groups WHERE id IN (${ph(gids)})`, gids);
+        const gmap = new Map(gs.map((g) => [g.id, g]));
+        ms.forEach((m) => {
+          const g = gmap.get(m.group_id); if (!g || hits.get(m.profile_id)?.kind === 'family') return;
+          const mine = g.owner_profile_id === home.id;
+          if (!mine && !(g.visibility === 'family' && prev.has(g.owner_profile_id))) return;
+          const P = namedMap.get(m.profile_id);
+          if (!mine && P && P.is_claimed && String(P.visibility || 'public').toLowerCase() === 'private') return;   // their own privacy wins
+          const path = [...pathTo(g.owner_profile_id), { id: m.profile_id, rel: g.name }];
+          const old = hits.get(m.profile_id);
+          if (!old || path.length < old.path.length) hits.set(m.profile_id, { kind: 'group', path, group: g.name, owner: g.owner_profile_id });
+        });
+      }
+    }
+
+    const list = [...hits.entries()].sort((a, b) => a[1].path.length - b[1].path.length).slice(0, 15);
+    const need = [...new Set(list.flatMap(([, h]) => h.path.map((x) => x.id)))];
+    const pmap = new Map();
+    if (need.length) {
+      const [ps] = await pool.query(`SELECT id, display_name, nickname, gender, photo_compressed_url, photo_url, is_claimed, owner_user_id FROM profiles WHERE id IN (${ph(need)})`, need);
+      ps.forEach((p) => pmap.set(p.id, groupMemberOut(p)));
+    }
+    const data = list.filter(([id]) => pmap.has(id)).map(([id, h]) => ({
+      kind: h.kind,
+      group: h.group || null,
+      owner: h.owner ? (h.owner === home.id ? null : (pmap.get(h.owner) || {}).display_name || null) : null,
+      person: pmap.get(id),
+      path: h.path.filter((x) => pmap.has(x.id)).map((x) => ({ p: pmap.get(x.id), rel: x.rel })),
+    }));
+    res.json({ success: true, data });
+  } catch (e) { console.error('search error:', e); res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ---------------------------------------------------------------------------------------------

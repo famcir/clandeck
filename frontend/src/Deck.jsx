@@ -274,7 +274,7 @@ function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
  *  - Line view: same tree, but the path you followed stays on top as a connected line
  *    (You → Father → Father's sibling → ...). Click any earlier person on the path to jump back to them.
  */
-function FamilyTree({ userId, onFocus }) {
+function FamilyTree({ userId, onFocus, openReq }) {
   const D = useDims();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('clandeck_tree_view') === 'line' ? 'line' : 'tree'; } catch { return 'tree'; }
@@ -363,6 +363,22 @@ function FamilyTree({ userId, onFocus }) {
   }, [home]);
 
   const jump = (i) => setTrail((t) => t.slice(0, i + 1));
+
+  // a person was picked in My Groups or in the search box: show their tree, joined to ME by the whole path
+  // (e.g. Me > Sister > College friends > Arun). The line before a group member carries the group's name.
+  const lastReq = useRef(null);
+  useEffect(() => {
+    if (!openReq || lastReq.current === openReq.n) return;
+    lastReq.current = openReq.n;
+    setTrail((t) => {
+      if (!t.length) return t;
+      const items = (openReq.path || [])
+        .filter((x) => x.p && x.p.id !== t[0].id && !(home && home.id === x.p.id))
+        .map((x) => ({ id: x.p.id, p: x.p, rel: x.rel || '' }));
+      return items.length ? [t[0], ...items] : t.slice(0, 1);
+    });
+    if (rootRef.current && rootRef.current.scrollIntoView) rootRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [openReq, home]);
   const back = () => setTrail((t) => (t.length > 1 ? t.slice(0, -1) : t));
   const goHome = () => setTrail((t) => t.slice(0, 1));
 
@@ -411,7 +427,7 @@ function FamilyTree({ userId, onFocus }) {
                   const i = k + 1;
                   const mx = (cxOf(i - 1) + D.TW / 2 + cxOf(i) - D.TW / 2) / 2;
                   return (
-                    <span key={'l' + i} style={{ position: 'absolute', left: mx - 36, width: 72, top: chipY - 20, textAlign: 'center', fontSize: 11, fontWeight: 600, color: '#8a7a5c' }}>
+                    <span key={'l' + i} title={item.rel} style={{ position: 'absolute', left: mx - (D.EW - 4) / 2, width: D.EW - 4, top: chipY - 6, transform: 'translateY(-100%)', textAlign: 'center', fontSize: 11, lineHeight: '12px', fontWeight: 600, color: '#8a7a5c', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
                       {item.rel}
                     </span>
                   );
@@ -519,6 +535,257 @@ function InviteModal({ invite, setInvite, home }) {
   );
 }
 
+
+// ================= MY GROUPS (friends, school, college, custom) =================
+const KIND_ICON = { friends: '👫', school: '🏫', college: '🎓', custom: '⭐' };
+const KIND_HINT = { friends: 'e.g. Weekend cricket gang', school: "e.g. St. Mary's 2005 batch", college: 'e.g. NIT Calicut Mech 2012', custom: 'e.g. Neighbours, Office team' };
+const gPost = async (path, body) => {
+  const r = await fetch(`${API_URL}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let data = {}; try { data = await r.json(); } catch { /* not JSON */ }
+  if (!r.ok || data.success === false) throw new Error(data.error || 'Something went wrong');
+  return data;
+};
+const smallPill = (dark) => ({ padding: '5px 12px', borderRadius: 14, border: dark ? 'none' : '1px solid #e0d2b4', background: dark ? '#1a1a1a' : '#fff', color: dark ? '#fff' : '#5a4524', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' });
+
+function Avatar({ p, size = 28 }) {
+  const [ok, setOk] = useState(true);
+  const src = photoOf(p) || (p && p.photo) || '';
+  return (
+    <div style={{ width: size, height: size, borderRadius: 8, overflow: 'hidden', background: '#e8d5b0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: size * 0.42, color: '#5a4524' }}>
+      {src && ok ? <img src={src} alt="" onError={() => setOk(false)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initialOf(p)}
+    </div>
+  );
+}
+
+function AddMemberModal({ group, homeId, members, onClose, onChange }) {
+  const [tab, setTab] = useState('find');
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [name, setName] = useState('');
+  const [gender, setGender] = useState('Male');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const inGroup = new Set(members.map((m) => m.id));
+
+  useEffect(() => {
+    const term = q.trim();
+    if (tab !== 'find' || term.length < 2) { setResults([]); return undefined; }
+    let dead = false;
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await fetch(`${API_URL}/api/profiles/search?q=${encodeURIComponent(term)}&owner_profile_id=${encodeURIComponent(homeId)}&include_linked=1`);
+        const j = await r.json();
+        if (!dead) setResults(j.success ? j.data : []);
+      } catch { if (!dead) setResults([]); }
+      if (!dead) setSearching(false);
+    }, 300);
+    return () => { dead = true; clearTimeout(t); };
+  }, [q, tab, homeId]);
+
+  const add = async (body, label) => {
+    setBusy(true); setMsg('');
+    try {
+      const j = await gPost(`/api/groups/${group.id}/members`, { home_id: homeId, ...body });
+      onChange(j.data); setMsg(`✓ ${label} added`);
+      if (body.display_name) setName('');
+    } catch (e) { setMsg(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 16 }} onClick={onClose}>
+      <div style={{ background: '#f7f4ef', borderRadius: 16, padding: 20, width: '100%', maxWidth: 420, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontWeight: 600, margin: '0 0 12px', fontSize: 15 }}>Add to {group.name}</h3>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button type="button" onClick={() => { setTab('find'); setMsg(''); }} style={navBtn(tab === 'find')}>Find on ClanDeck</button>
+          <button type="button" onClick={() => { setTab('new'); setMsg(''); }} style={navBtn(tab === 'new')}>New person</button>
+        </div>
+        {tab === 'find' ? (
+          <>
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Type a name, or an exact email / mobile number" style={{ width: '100%', padding: '11px 14px', borderRadius: 20, border: 'none', background: '#f0ede8', fontSize: 13, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }} />
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {searching && <div style={{ fontSize: 12, color: '#8a7a65' }}>Searching...</div>}
+              {!searching && q.trim().length >= 2 && results.length === 0 && <div style={{ fontSize: 12, color: '#8a7a65' }}>Nobody found. Use "New person" to add them by name.</div>}
+              {results.map((r) => (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 12, padding: 8 }}>
+                  <Avatar p={r} size={34} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.display_name}</div>
+                    <div style={{ fontSize: 11, color: '#8a7a65' }}>{[r.nickname, r.location].filter(Boolean).join(' • ') || (r.is_claimed ? 'On ClanDeck' : 'Added by you')}</div>
+                  </div>
+                  {inGroup.has(r.id)
+                    ? <span style={{ fontSize: 11, color: '#4a8a3a', fontWeight: 600 }}>✓ In group</span>
+                    : <button type="button" disabled={busy} onClick={() => add({ profile_id: r.id }, r.display_name)} style={smallPill(true)}>Add</button>}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" maxLength={80} style={{ width: '100%', padding: '11px 14px', borderRadius: 20, border: 'none', background: '#f0ede8', fontSize: 13, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              {['Male', 'Female'].map((g) => (
+                <button key={g} type="button" onClick={() => setGender(g)} style={{ ...smallPill(gender === g), flex: 1, padding: '9px' }}>{g}</button>
+              ))}
+            </div>
+            <button type="button" disabled={busy || !name.trim()} onClick={() => add({ display_name: name, gender }, name.trim())} style={{ ...smallPill(true), width: '100%', marginTop: 12, padding: 12, borderRadius: 20, fontSize: 13, opacity: busy || !name.trim() ? 0.5 : 1 }}>{busy ? 'Adding...' : 'Add person'}</button>
+            <div style={{ fontSize: 10, color: '#8a7a65', marginTop: 6 }}>You can invite them later with a temporary login, and add their own family.</div>
+          </>
+        )}
+        {msg && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: msg.startsWith('✓') ? '#4a8a3a' : '#b3261e' }}>{msg}</div>}
+        <button type="button" onClick={onClose} style={{ width: '100%', marginTop: 12, padding: 10, borderRadius: 20, border: 'none', background: 'transparent', color: '#8a7a65', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+function GroupsCard({ groups, homeId, onChange, onOpen }) {
+  const [open, setOpen] = useState({});        // expanded groups
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newKind, setNewKind] = useState('school');
+  const [adding, setAdding] = useState(null);  // group id the "Add" pop-up is for
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // keep the first group (My Friends) open the first time
+  useEffect(() => { if (groups.length && Object.keys(open).length === 0) setOpen({ [groups[0].id]: true }); }, [groups]); // eslint-disable-line
+
+  const run = async (fn) => { setBusy(true); setErr(''); try { await fn(); } catch (e) { setErr(e.message); } setBusy(false); };
+  const create = () => run(async () => {
+    const j = await gPost('/api/groups', { home_id: homeId, name: newName, kind: newKind });
+    onChange(j.data); setNewName(''); setShowNew(false);
+    const made = j.data.find((g) => g.name.toLowerCase() === newName.trim().replace(/\s+/g, ' ').toLowerCase());
+    if (made) setOpen((o) => ({ ...o, [made.id]: true }));
+  });
+  const rename = (g) => { const n = window.prompt('New name for this group', g.name); if (n && n.trim() && n.trim() !== g.name) run(async () => onChange((await gPost(`/api/groups/${g.id}/rename`, { home_id: homeId, name: n })).data)); };
+  const del = (g) => { if (window.confirm(`Delete the group "${g.name}"? The people in it are not deleted from ClanDeck.`)) run(async () => onChange((await gPost(`/api/groups/${g.id}/delete`, { home_id: homeId })).data)); };
+  const removeMember = (g, m) => { if (window.confirm(`Remove ${m.display_name} from "${g.name}"?`)) run(async () => onChange((await gPost(`/api/groups/${g.id}/members/remove`, { home_id: homeId, profile_id: m.id })).data)); };
+  const toggleShare = (g) => run(async () => onChange((await gPost(`/api/groups/${g.id}/visibility`, { home_id: homeId, visibility: g.visibility === 'family' ? 'private' : 'family' })).data));
+  const addingGroup = groups.find((g) => g.id === adding);
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <h3 style={{ fontWeight: 600, fontSize: 12, margin: 0 }}>My Groups ({groups.length})</h3>
+        <button type="button" onClick={() => { setShowNew((v) => !v); setErr(''); }} style={smallPill(!showNew)}>{showNew ? 'Cancel' : '＋ New group'}</button>
+      </div>
+
+      {showNew && (
+        <div style={{ background: '#faf6ee', border: '1px solid #f0e0c0', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+            {Object.keys(KIND_ICON).map((k) => (
+              <button key={k} type="button" onClick={() => setNewKind(k)} style={smallPill(newKind === k)}>{KIND_ICON[k]} {k === 'custom' ? 'Other' : k[0].toUpperCase() + k.slice(1)}</button>
+            ))}
+          </div>
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={60} placeholder={KIND_HINT[newKind]} onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) create(); }}
+            style={{ width: '100%', padding: '9px 12px', borderRadius: 16, border: '1px solid #e8dcc2', background: '#fff', fontSize: 12, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }} />
+          <button type="button" disabled={busy || !newName.trim()} onClick={create} style={{ ...smallPill(true), width: '100%', marginTop: 8, padding: 9, opacity: busy || !newName.trim() ? 0.5 : 1 }}>Create group</button>
+        </div>
+      )}
+      {err && <div style={{ fontSize: 11, color: '#b3261e', marginBottom: 8 }}>{err}</div>}
+
+      {groups.length === 0 && <p style={{ fontSize: 11, color: '#aaa' }}>Loading your groups…</p>}
+      {groups.map((g) => {
+        const isOpen = !!open[g.id];
+        return (
+          <div key={g.id} style={{ border: '1px solid #f0e0c0', borderRadius: 10, marginBottom: 8, background: '#fff', overflow: 'hidden' }}>
+            <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.id]: !o[g.id] }))} aria-expanded={isOpen}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', border: 'none', background: isOpen ? '#faf6ee' : '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+              <span style={{ fontSize: 15 }}>{KIND_ICON[g.kind] || '⭐'}</span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</span>
+              <span style={{ fontSize: 11, color: '#8a7a65' }}>{g.members.length}</span>
+              <span style={{ fontSize: 10, color: '#8a7a65' }}>{isOpen ? '▲' : '▼'}</span>
+            </button>
+            {isOpen && (
+              <div style={{ padding: '4px 8px 8px' }}>
+                {g.members.length === 0 && <div style={{ fontSize: 11, color: '#aaa', padding: '6px 2px' }}>No one here yet.</div>}
+                {g.members.map((m) => (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button type="button" onClick={() => onOpen(m, g.name)} title={`Open ${m.display_name}'s family tree`}
+                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: 8, fontFamily: 'inherit' }}>
+                      <Avatar p={m} size={28} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.display_name}</span>
+                    </button>
+                    <button type="button" onClick={() => removeMember(g, m)} title={`Remove ${m.display_name} from this group`} aria-label={`Remove ${m.display_name}`}
+                      style={{ border: 'none', background: 'none', color: '#b0a088', cursor: 'pointer', fontSize: 13, padding: '4px 6px' }}>✕</button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => toggleShare(g)} disabled={busy} aria-pressed={g.visibility === 'family'}
+                  title="When this is on, your relatives can find these people by searching, and see the path through you"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', margin: '6px 0 2px', padding: '6px 8px', borderRadius: 10, border: '1px solid #ece0c6', background: g.visibility === 'family' ? '#eef7ea' : '#faf7f2', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: g.visibility === 'family' ? '#3f7a2f' : '#8a7a65', fontFamily: 'inherit', textAlign: 'left' }}>
+                  <span>{g.visibility === 'family' ? '👨‍👩‍👧 Shared with my family' : '🔒 Only I can see this'}</span>
+                  <span style={{ marginLeft: 'auto', fontWeight: 500, textDecoration: 'underline' }}>{g.visibility === 'family' ? 'Make private' : 'Share'}</span>
+                </button>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  <button type="button" onClick={() => setAdding(g.id)} style={smallPill(true)}>＋ Add people</button>
+                  {!g.is_default && <button type="button" onClick={() => rename(g)} style={smallPill(false)}>Rename</button>}
+                  {!g.is_default && <button type="button" onClick={() => del(g)} style={{ ...smallPill(false), color: '#b3261e' }}>Delete</button>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {addingGroup && <AddMemberModal group={addingGroup} homeId={homeId} members={addingGroup.members} onClose={() => setAdding(null)} onChange={onChange} />}
+    </div>
+  );
+}
+
+
+// ================= HEADER SEARCH RESULTS =================
+function SearchPanel({ q, homeId, onPick, onClose }) {
+  const [rows, setRows] = useState(null);   // null = loading
+  const term = q.trim();
+  useEffect(() => {
+    if (term.length < 2) { setRows([]); return undefined; }
+    let dead = false;
+    setRows(null);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/search?q=${encodeURIComponent(term)}&home_id=${encodeURIComponent(homeId)}`);
+        const j = await r.json();
+        if (!dead) setRows(j.success ? j.data : []);
+      } catch { if (!dead) setRows([]); }
+    }, 300);
+    return () => { dead = true; clearTimeout(t); };
+  }, [term, homeId]);
+  useEffect(() => {
+    const k = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
+  if (term.length < 2) return null;
+
+  const how = (r) => {
+    const names = r.path.slice(0, -1).map((x) => x.p.display_name.split(' ')[0]);
+    if (r.kind === 'group') return `${r.owner ? `${r.owner}'s` : 'Your'} group · ${r.group}`;
+    return r.path.map((x) => x.rel).join(' › ') + (names.length ? ` (via ${names.join(' › ')})` : '');
+  };
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'transparent' }} />
+      <div className="search-panel" role="listbox" style={{ position: 'fixed', zIndex: 9001, left: '50%', transform: 'translateX(-50%)', width: 'min(560px, 94vw)', maxHeight: '60vh', overflowY: 'auto', background: '#fff', border: '1px solid #e9e2d6', borderRadius: 14, boxShadow: '0 10px 30px rgba(0,0,0,.18)', padding: 6 }}>
+        <style>{`.search-panel{ top: 58px; } @media(max-width: 900px){ .search-panel{ top: 128px; } }`}</style>
+        {rows === null && <div style={{ padding: 12, fontSize: 12, color: '#8a7a65' }}>Searching...</div>}
+        {rows && rows.length === 0 && <div style={{ padding: 12, fontSize: 12, color: '#8a7a65' }}>Nobody found in your family or groups.</div>}
+        {rows && rows.map((r) => (
+          <button key={r.person.id} type="button" onClick={() => onPick(r)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: 'none', background: 'none', borderRadius: 10, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+            <Avatar p={r.person} size={36} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.person.display_name}</span>
+              <span style={{ display: 'block', fontSize: 11, color: '#8a7a5c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{how(r)}</span>
+            </span>
+            <span style={{ fontSize: 10, color: '#8a7a65', flexShrink: 0 }}>{r.kind === 'group' ? '👥' : '🌳'}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ================= AD SLOTS =================
 // Shows a labelled empty box until real ads are switched on. To go live, put these in the frontend .env.production
 // (Google AdSense) and rebuild:  VITE_ADSENSE_CLIENT=ca-pub-XXXXXXXXXXXXXXXX
@@ -575,6 +842,9 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [groups, setGroups] = useState([]);
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
+  const [openReq, setOpenReq] = useState(null);
+  const [searchQ, setSearchQ] = useState('');             // what is typed in the header search box
+  const [searchOpen, setSearchOpen] = useState(true);       // results panel shown (closes after a pick, opens again when you type)          // a group member was clicked -> show their tree
   const [tempLogin, setTempLogin] = useState(false);   // still on a temporary password?
   const [photoUrl, setPhotoUrl] = useState(localStorage.getItem('photo_url') || '');
   const [pos, setPos] = useState(JSON.parse(localStorage.getItem('clandeck_photo_pos') || '{"x":50,"y":50,"zoom":100}'));
@@ -582,6 +852,15 @@ export default function Deck({ onGoProfile, onLogout }) {
     nickname: localStorage.getItem('profile_nickname') || '',
     visibility: String(localStorage.getItem('profile_visibility') || 'public').toLowerCase()
   });
+
+  const loadGroups = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_URL}/api/groups?home_id=${encodeURIComponent(storedUser.id || storedUser.uname || '')}`);
+      const j = await r.json();
+      if (j.success) setGroups(j.data);
+    } catch { /* groups stay empty; the rest of the page still works */ }
+  }, []); // eslint-disable-line
+  useEffect(() => { loadGroups(); }, [loadGroups]);
 
   useEffect(() => {
     const safeParse = (key) => {
@@ -594,7 +873,6 @@ export default function Deck({ onGoProfile, onLogout }) {
       } catch { return []; }
     };
     
-    setGroups(safeParse('clandeck_groups'));
     try { 
       const p = JSON.parse(localStorage.getItem('clandeck_privacy') || '{}');
       setPrivacy(p);
@@ -681,7 +959,9 @@ export default function Deck({ onGoProfile, onLogout }) {
         @media(max-width: 700px){ .deck-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } .deck-grid .ad-square { margin-left: auto; margin-right: auto; } }
       `}</style>
 
-      <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} />
+      <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} onSearch={(v) => { setSearchQ(v); setSearchOpen(true); }} />
+      {searchOpen && <SearchPanel q={searchQ} homeId={storedUser?.id || storedUser?.uname} onClose={() => setSearchOpen(false)}
+        onPick={(r) => { setSearchOpen(false); setOpenReq({ path: r.path, n: Date.now() }); }} />}
 
       {tempLogin && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
@@ -726,18 +1006,13 @@ export default function Deck({ onGoProfile, onLogout }) {
                 <span style={{fontWeight: 600, fontSize:'13px'}}>{isPublic ? getName().split(' ')[0] : 'Hidden'}'s Family Tree {isPublic && profileInfo.nickname ? `(${profileInfo.nickname})` : ''}</span>
                 <span style={{fontSize:'10px', background:'white', padding:'4px 10px', borderRadius:'20px', fontWeight: 500, border:'1px solid #e9e2d6'}}>{visibleFamily.length + 1} Members • {profileInfo.visibility}</span>
               </div>
-              <FamilyTree userId={storedUser?.id || storedUser?.uname} />
+              <FamilyTree userId={storedUser?.id || storedUser?.uname} openReq={openReq} />
             </div>
           ) : <div className="card" style={{textAlign:'center', padding:'40px'}}><p style={{color:'#aaa', fontSize:'13px'}}>Family Tree is hidden</p></div>}
         </div>
 
         <div>
-          <div className="card">
-            <h3 style={{fontWeight: 600, fontSize:'12px', marginBottom:'10px'}}>My Groups ({groups.length})</h3>
-            {groups.length===0 ? <p style={{fontSize:'11px', color:'#aaa'}}>No groups yet. Create in Profile Edit.</p> : groups.map(g=>(
-              g && <div key={g.id} style={{padding:'8px', border:'1px solid #f0e0c0', borderRadius:'8px', marginBottom:'6px', fontSize:'12px'}}><strong>{g.name}</strong><br/><span style={{color:'#888'}}>{g.members?.length || 0} members</span></div>
-            ))}
-          </div>
+          <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />
           <div style={{marginTop:'16px'}}><AdSlot kind="square" /></div>
         </div>
       </div>
