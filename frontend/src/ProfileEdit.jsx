@@ -289,7 +289,7 @@ function PersonEditor({ profile, isSelf, storedUser, onSaved, onCancel }) {
 // =====================================================================
 // One family member row: photo, name, Edit and "Family" buttons
 // =====================================================================
-function PersonCard({ p, relation, onEdit, onOpen, onInvite }) {
+function PersonCard({ p, relation, onEdit, onOpen }) {
   const img = p.photo_compressed_url || p.photo_url;
   const bits = [relation, p.gender, isGone(p) ? 'passed away' : null].filter(Boolean);
   return (
@@ -304,7 +304,6 @@ function PersonCard({ p, relation, onEdit, onOpen, onInvite }) {
         <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '2px' }}>{bits.join(' • ')}</div>
       </div>
       <div style={{ display: 'flex', gap: '6px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '190px' }}>
-        {onInvite && !p.is_claimed && <button type="button" onClick={() => onInvite(p)} title="Give this person a temporary login and share it" style={smallBtn}>📤 Invite</button>}
         <button type="button" onClick={() => onEdit(p)} style={smallBtn}>✏️ Edit</button>
         <button type="button" onClick={() => onOpen(p, relation)} style={{ ...smallBtn, background: '#111', color: 'white', border: '1px solid #111' }}>Family →</button>
       </div>
@@ -342,7 +341,6 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const [matches, setMatches] = useState([]);                // people who already exist and match the typed name
   const [picked, setPicked] = useState(null);                // an existing person chosen from that list
   const [removePlan, setRemovePlan] = useState(null);        // preview of what removing a member will do
-  const [invite, setInvite] = useState(null);                // { person, mobile, result } while the share pop-up is open
   const [tempLogin, setTempLogin] = useState(false);         // this login still uses a temporary password
   const [credsOpen, setCredsOpen] = useState(false);
   const [creds, setCreds] = useState({ current: '', uname: '', pass: '', pass2: '' });
@@ -455,37 +453,6 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
     setEditing(null);
     setTrail((t) => t.map((x) => (x.id === data.id ? { ...x, name: data.display_name || x.name } : x)));
     refreshFocus().catch(() => {});
-  };
-
-  // ----- invite: temporary login to share by WhatsApp / SMS -----
-  const openInvite = (p) => setInvite({ person: p, mobile: p.mobile_number || '', result: null });
-
-  const createInvite = async () => {
-    setBusy(true);
-    try {
-      const res = await fetchJSON('/api/profiles/invite', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile_id: invite.person.id, home_id: me.id, mobile: invite.mobile })
-      });
-      if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not create the login');
-      setInvite((i) => ({ ...i, result: res.data }));
-    } catch (e) { alert(e.message); }
-    setBusy(false);
-  };
-
-  const inviteText = () => {
-    const r = invite.result;
-    return `Hi ${r.name}, ${me.display_name || 'a family member'} added you to the family tree on ClanDeck.\n\nOpen https://clandeck.com and log in with\nUsername: ${r.username}\nPassword: ${r.password}\n\nThis temporary login works for ${r.valid_days} days. After you log in, please set your own username and password.`;
-  };
-  // phone number for the links: digits only; a plain 10-digit number gets the India code 91
-  const waNumber = () => {
-    const d = String(invite.mobile || '').replace(/\D/g, '');
-    return d.length === 10 ? '91' + d : d;
-  };
-  const shareWhatsApp = () => window.open(`https://wa.me/${waNumber()}?text=${encodeURIComponent(inviteText())}`, '_blank', 'noopener');
-  const shareSms = () => { window.location.href = `sms:${waNumber() ? '+' + waNumber() : ''}?body=${encodeURIComponent(inviteText())}`; };
-  const copyInvite = async () => {
-    try { await navigator.clipboard.writeText(inviteText()); alert('Message copied'); } catch { alert('Could not copy, please select the text and copy it'); }
   };
 
   // ----- the invited person sets their own username / password -----
@@ -608,8 +575,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           {/* PARENTS */}
           <div style={{ ...cardStyle, marginTop: '12px' }}>
             <b style={{ fontSize: '11px' }}>PARENTS</b>
-            {fam.father && <PersonCard p={fam.father} relation="Father" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />}
-            {fam.mother && <PersonCard p={fam.mother} relation="Mother" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />}
+            {fam.father && <PersonCard p={fam.father} relation="Father" onEdit={setEditing} onOpen={openFamily} />}
+            {fam.mother && <PersonCard p={fam.mother} relation="Mother" onEdit={setEditing} onOpen={openFamily} />}
             {!fam.father && !fam.mother && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>None</div>}
           </div>
 
@@ -621,14 +588,14 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
               const kids = fam.children.filter((c) => String(c.spouse_group) === String(sp.spouse_group));
               return (
                 <div key={sp.id} style={{ background: '#faf7f2', border: '1px solid #e9e2d6', borderRadius: '14px', padding: '8px 10px 12px', marginTop: '10px' }}>
-                  <PersonCard p={sp} relation={fam.spouses.length > 1 ? `Spouse ${i + 1}` : 'Spouse'} onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />
+                  <PersonCard p={sp} relation={fam.spouses.length > 1 ? `Spouse ${i + 1}` : 'Spouse'} onEdit={setEditing} onOpen={openFamily} />
                   <div style={{ marginLeft: '14px', paddingLeft: '12px', borderLeft: '2px solid #e9e2d6', marginTop: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                       <b style={{ fontSize: '10px' }}>CHILDREN WITH {String(sp.display_name || '').toUpperCase()} ({kids.length})</b>
                       <button type="button" onClick={() => openAdd('Child', sp.id)} style={smallBtn}>+ Add child</button>
                     </div>
                     {kids.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '6px' }}>None</div>}
-                    {kids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />)}
+                    {kids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} />)}
                   </div>
                 </div>
               );
@@ -636,7 +603,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
             {otherKids.length > 0 && (
               <div style={{ marginTop: '14px' }}>
                 <b style={{ fontSize: '10px' }}>OTHER CHILDREN ({otherKids.length})</b>
-                {otherKids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />)}
+                {otherKids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} />)}
               </div>
             )}
           </div>
@@ -645,7 +612,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           <div style={{ ...cardStyle, marginTop: '12px' }}>
             <b style={{ fontSize: '11px' }}>SIBLINGS ({fam.siblings.length})</b>
             {fam.siblings.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>None</div>}
-            {fam.siblings.map((s) => <PersonCard key={s.id} p={s} relation="Sibling" onEdit={setEditing} onOpen={openFamily} onInvite={openInvite} />)}
+            {fam.siblings.map((s) => <PersonCard key={s.id} p={s} relation="Sibling" onEdit={setEditing} onOpen={openFamily} />)}
           </div>
         </div>
       </div>
@@ -723,39 +690,6 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
               {busy ? 'Checking...' : '🗑 Remove from family'}
             </button>
           </div>
-        </Modal>
-      )}
-
-      {/* INVITE POP-UP: temporary login + WhatsApp / SMS */}
-      {invite && (
-        <Modal onClose={() => !busy && setInvite(null)} maxWidth={440}>
-          <h3 style={{ fontWeight: 600, margin: 0 }}>Invite {invite.person.display_name}</h3>
-          {!invite.result ? (
-            <>
-              <p style={{ fontSize: '13px', color: '#555', lineHeight: 1.5 }}>This makes a <b>temporary username and password</b> for {invite.person.display_name}, valid for 7 days. They log in, see their own family tree, and add their own family members.</p>
-              <label style={labelStyle}>MOBILE NUMBER (FOR WHATSAPP / SMS)</label>
-              <input value={invite.mobile} onChange={(e) => setInvite((i) => ({ ...i, mobile: e.target.value }))} placeholder="e.g. 9876543210" inputMode="tel" style={inputStyle} />
-              <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '4px' }}>A 10-digit number gets the India code (91). For other countries type the full number with the country code.</div>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                <button type="button" onClick={() => setInvite(null)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-                <button type="button" disabled={busy} onClick={createInvite} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Creating...' : 'Create temporary login'}</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ margin: '12px 0', padding: '12px', background: 'white', border: '1px solid #e9e2d6', borderRadius: '12px', fontSize: '13px', lineHeight: 1.7 }}>
-                <div><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 500 }}>USERNAME</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.username}</b></div>
-                <div style={{ marginTop: '6px' }}><span style={{ color: '#8a7a65', fontSize: '11px', fontWeight: 500 }}>PASSWORD</span><br /><b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{invite.result.password}</b></div>
-              </div>
-              <div style={{ fontSize: '11px', color: '#8a5a10', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: '10px', padding: '8px 10px' }}>⚠️ The password is shown only now. Share it right away. If it is lost, press Invite again to make a new one.</div>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
-                <button type="button" onClick={shareWhatsApp} style={{ flex: 1, minWidth: 120, padding: '11px', borderRadius: '20px', border: 'none', background: '#25d366', color: 'white', fontWeight: 600, cursor: 'pointer' }}>WhatsApp</button>
-                <button type="button" onClick={shareSms} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: 'none', background: '#1a73e8', color: 'white', fontWeight: 600, cursor: 'pointer' }}>SMS</button>
-                <button type="button" onClick={copyInvite} style={{ flex: 1, minWidth: 90, padding: '11px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 600, cursor: 'pointer' }}>Copy</button>
-              </div>
-              <button type="button" onClick={() => setInvite(null)} style={{ width: '100%', marginTop: '10px', padding: '10px', borderRadius: '20px', border: 'none', background: 'transparent', color: '#8a7a65', fontWeight: 500, cursor: 'pointer' }}>Done</button>
-            </>
-          )}
         </Modal>
       )}
 

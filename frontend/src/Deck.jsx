@@ -8,8 +8,8 @@ const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
 // ================= FAMILY TREE (tree view + line view) =================
 // ---- sizes: smaller on phones. IMG = photo size, CW/CH = space one person takes (photo + name + relation) ----
 const DIMS = {
-  desk: { IMG: 60, CW: 96, CH: 118, GAP: 24, COUPLE: 52, ROW: 190, PAD: 30, BUS: 26, TW: 128, TH: 48, EW: 84, TIMG: 34, TRAIL_H: 116 },
-  mob:  { IMG: 44, CW: 72, CH: 96,  GAP: 14, COUPLE: 34, ROW: 154, PAD: 14, BUS: 22, TW: 104, TH: 42, EW: 54, TIMG: 28, TRAIL_H: 100 },
+  desk: { IMG: 60, CW: 96, CH: 118, GAP: 24, COUPLE: 24, ROW: 190, PAD: 30, BUS: 26, TW: 128, TH: 48, EW: 84, TIMG: 34, TRAIL_H: 116 },
+  mob:  { IMG: 44, CW: 72, CH: 96,  GAP: 16, COUPLE: 16, ROW: 154, PAD: 14, BUS: 22, TW: 104, TH: 42, EW: 54, TIMG: 28, TRAIL_H: 100 },
 };
 const LINE = '#b89a6a';
 const LINE_W = 2;
@@ -23,6 +23,17 @@ function useDims() {
     return () => window.removeEventListener('resize', f);
   }, []);
   return d;
+}
+
+// how is person `id` directly related to the owner of this family? (null when not at all)
+function relationIn(fam, id) {
+  if (!fam || !id) return null;
+  if (fam.father && fam.father.id === id) return 'Father';
+  if (fam.mother && fam.mother.id === id) return 'Mother';
+  if ((fam.siblings || []).some((x) => x.id === id)) return 'Sibling';
+  if ((fam.spouses || []).some((x) => x.id === id)) return 'Spouse';
+  if ((fam.children || []).some((x) => x.id === id)) return 'Child';
+  return null;
 }
 
 const photoOf = (p) => (p && (p.photo_compressed_url || p.photo_url)) || '';
@@ -70,7 +81,7 @@ function buildLayout(me, fam, D) {
   const mid = [];
   siblings.forEach((s, i) => {
     mid.push({ p: s, x, rel: 'Sibling' });
-    x += CW + (i === siblings.length - 1 ? GAP + 10 : GAP);
+    x += CW + GAP;
   });
   const meX = x;
   mid.push({ p: me, x: meX, rel: 'Self', center: true });
@@ -275,6 +286,10 @@ function FamilyTree({ userId, onFocus }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef(null);
+  const rootRef = useRef(null);
+  const famCache = useRef({});                // family of every person we have opened, to spot direct relations
+  const [fitW, setFitW] = useState(0);        // width available for the tree
+  const [invite, setInvite] = useState(null); // invite pop-up
 
   const focusId = trail[trail.length - 1].id;
   const atHome = trail.length === 1;
@@ -290,6 +305,8 @@ function FamilyTree({ userId, onFocus }) {
       .then((j) => {
         if (!alive) return;
         if (!j.success) throw new Error(j.error || 'Could not load the family tree');
+        famCache.current[focusId] = j.family || {};
+        if (j.myProfile) famCache.current[j.myProfile.id] = j.family || {};
         setData(j);
         if (focusId === userId) { setHome(j.myProfile); setMyProfileId(j.myProfile.id); }
         if (onFocus) onFocus(j.myProfile);
@@ -309,18 +326,38 @@ function FamilyTree({ userId, onFocus }) {
   const trailLeft = (T - 1) * (D.TW + D.EW) + D.TW / 2;
   const trailH = lineMode ? D.TRAIL_H : 0;
   const W = layout ? (lineMode ? Math.max(layout.width, 2 * (trailLeft + D.PAD)) : layout.width) : 0;
+  // shrink the whole tree to fit the space it has (never below 55%, after that it scrolls inside its own box)
+  const scale = W && fitW ? Math.min(1, Math.max(0.55, fitW / W)) : 1;
+  const needScroll = W * scale > fitW + 1;
 
   // keep the selected person in the horizontal middle of the view
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && layout) el.scrollLeft = Math.max(0, W / 2 - el.clientWidth / 2);
-  }, [layout, W]);
+    if (el && layout) el.scrollLeft = Math.max(0, (W * scale) / 2 - el.clientWidth / 2);
+  }, [layout, W, scale]);
+
+  // watch the width of the box the tree lives in
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return undefined;
+    const measure = () => setFitW(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure); }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // cards pass (person, relation); a person already on the path just jumps back to that point, so it never loops
   const pick = useCallback((p, rel) => {
     setTrail((t) => {
       const idx = t.findIndex((x, i) => x.id === p.id || (x.p && x.p.id === p.id) || (i === 0 && home && home.id === p.id));
       if (idx >= 0) return t.slice(0, idx + 1);
+      // directly related to someone earlier on the path (e.g. Me -> Mother -> my Sister)?  Then join straight to that person
+      for (let i = t.length - 2; i >= 0; i--) {
+        const r = relationIn(famCache.current[t[i].id], p.id);
+        if (r) return [...t.slice(0, i + 1), { id: p.id, p, rel: r }];
+      }
       return [...t, { id: p.id, p, rel: rel || '' }];
     });
   }, [home]);
@@ -331,10 +368,11 @@ function FamilyTree({ userId, onFocus }) {
 
   const chipY = 14 + D.TH / 2;
   const cxOf = (i) => W / 2 - (T - 1 - i) * (D.TW + D.EW);
+  const canInvite = (p) => !!(p && home && !p.is_claimed && p.id !== home.id && p.owner_user_id && p.owner_user_id === home.owner_user_id);
   const profileOf = (item, i) => item.p || (i === 0 ? home : null);
 
   return (
-    <div style={{ width: '100%', fontFamily: 'inherit' }}>
+    <div ref={rootRef} style={{ width: '100%', minWidth: 0, fontFamily: 'inherit' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 14px', flexWrap: 'wrap' }}>
         <button type="button" onClick={() => chooseView('tree')} style={navBtn(!lineMode)}>🌳 Tree view</button>
         <button type="button" onClick={() => chooseView('line')} style={navBtn(lineMode)}>➖ Line view</button>
@@ -349,8 +387,9 @@ function FamilyTree({ userId, onFocus }) {
       {loading && !data && <div style={{ padding: 24, color: '#8a7a5c', fontWeight: 600, fontSize: 12 }}>Loading family tree…</div>}
 
       {layout && (
-        <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'hidden', opacity: loading ? 0.5 : 1, transition: 'opacity .15s' }}>
-          <div style={{ position: 'relative', width: W, height: trailH + layout.height, margin: '0 auto' }}>
+        <div ref={scrollRef} style={{ overflowX: needScroll ? 'auto' : 'hidden', overflowY: 'hidden', opacity: loading ? 0.5 : 1, transition: 'opacity .15s' }}>
+         <div style={{ position: 'relative', width: W * scale, height: (trailH + layout.height) * scale, margin: '0 auto' }}>
+          <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: trailH + layout.height, transformOrigin: '0 0', transform: scale < 1 ? `scale(${scale})` : 'none' }}>
 
             {lineMode && (
               <>
@@ -395,10 +434,87 @@ function FamilyTree({ userId, onFocus }) {
               {layout.nodes.map((n) => (
                 <Person key={n.p.id + n.rel} node={n} D={D} isLogin={!!myProfileId && n.p.id === myProfileId} onPick={pick} />
               ))}
+              {layout.nodes.filter((n) => canInvite(n.p)).map((n) => (
+                <button key={'inv' + n.p.id} type="button" title={`Invite ${n.p.display_name} (temporary login by WhatsApp / SMS)`} aria-label={`Invite ${n.p.display_name}`}
+                  onClick={() => setInvite({ person: n.p, mobile: n.p.mobile_number || '', result: null })}
+                  style={{ position: 'absolute', left: n.x + (D.CW + D.IMG) / 2 - 13, top: n.y - 9, width: 24, height: 24, padding: 0, borderRadius: '50%', border: '2px solid #fff', background: '#1a1a1a', color: '#fff', fontSize: 11, lineHeight: '20px', cursor: 'pointer', zIndex: 30, boxShadow: '0 1px 4px rgba(0,0,0,.3)' }}>
+                  📤
+                </button>
+              ))}
             </div>
           </div>
+         </div>
         </div>
       )}
+      {invite && home && <InviteModal invite={invite} setInvite={setInvite} home={home} />}
+    </div>
+  );
+}
+
+
+// ================= INVITE (temporary login to share by WhatsApp / SMS) =================
+const invInput = { width: '100%', padding: '12px 16px', borderRadius: '20px', border: 'none', background: '#f0ede8', fontSize: '13px', boxSizing: 'border-box', outline: 'none' };
+const invLabel = { fontSize: '9px', fontWeight: 600, color: '#8a7a65', letterSpacing: '0.5px', marginBottom: '6px', display: 'block' };
+
+function InviteModal({ invite, setInvite, home }) {
+  const [busy, setBusy] = useState(false);
+  const close = () => { if (!busy) setInvite(null); };
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`${API_URL}/api/profiles/invite`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile_id: invite.person.id, home_id: home.id, mobile: invite.mobile }),
+      });
+      let data = {}; try { data = await r.json(); } catch { /* not JSON */ }
+      if (!r.ok || !data.success) throw new Error(data.error || 'Could not create the login');
+      setInvite((i) => ({ ...i, result: data }));
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
+  const text = () => {
+    const r = invite.result;
+    return `Hi ${r.name}, ${home.display_name || 'a family member'} added you to the family tree on ClanDeck.\n\nOpen https://clandeck.com and log in with\nUsername: ${r.username}\nPassword: ${r.password}\n\nThis temporary login works for ${r.valid_days} days. After you log in, please set your own username and password.`;
+  };
+  // digits only; a plain 10-digit number gets the India code 91
+  const num = () => { const d = String(invite.mobile || '').replace(/\D/g, ''); return d.length === 10 ? '91' + d : d; };
+  const whatsapp = () => window.open(`https://wa.me/${num()}?text=${encodeURIComponent(text())}`, '_blank', 'noopener');
+  const sms = () => { window.location.href = `sms:${num() ? '+' + num() : ''}?body=${encodeURIComponent(text())}`; };
+  const copy = async () => { try { await navigator.clipboard.writeText(text()); alert('Message copied'); } catch { alert('Could not copy, please select the text and copy it'); } };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 16 }} onClick={close}>
+      <div style={{ background: '#f7f4ef', borderRadius: 16, padding: 20, width: '100%', maxWidth: 440, maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontWeight: 600, margin: 0 }}>Invite {invite.person.display_name}</h3>
+        {!invite.result ? (
+          <>
+            <p style={{ fontSize: 13, color: '#555', lineHeight: 1.5 }}>This makes a <b>temporary username and password</b> for {invite.person.display_name}, valid for 7 days. They log in, see their own family tree, and add their own family members.</p>
+            <label style={invLabel}>MOBILE NUMBER (FOR WHATSAPP / SMS)</label>
+            <input value={invite.mobile} onChange={(e) => setInvite((i) => ({ ...i, mobile: e.target.value }))} placeholder="e.g. 9876543210" inputMode="tel" style={invInput} />
+            <div style={{ fontSize: 10, color: '#8a7a65', marginTop: 4 }}>A 10-digit number gets the India code (91). For other countries type the full number with the country code.</div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+              <button type="button" onClick={close} style={{ flex: 1, padding: 12, borderRadius: 20, border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+              <button type="button" disabled={busy} onClick={create} style={{ flex: 2, padding: 12, borderRadius: 20, border: 'none', background: 'black', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Creating...' : 'Create temporary login'}</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ margin: '12px 0', padding: 12, background: 'white', border: '1px solid #e9e2d6', borderRadius: 12, fontSize: 13, lineHeight: 1.7 }}>
+              <div><span style={{ color: '#8a7a65', fontSize: 11, fontWeight: 500 }}>USERNAME</span><br /><b style={{ fontFamily: 'monospace', fontSize: 15 }}>{invite.result.username}</b></div>
+              <div style={{ marginTop: 6 }}><span style={{ color: '#8a7a65', fontSize: 11, fontWeight: 500 }}>PASSWORD</span><br /><b style={{ fontFamily: 'monospace', fontSize: 15 }}>{invite.result.password}</b></div>
+            </div>
+            <div style={{ fontSize: 11, color: '#8a5a10', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: 10, padding: '8px 10px' }}>⚠️ The password is shown only now. Share it right away. If it is lost, press Invite again to make a new one.</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              <button type="button" onClick={whatsapp} style={{ flex: 1, minWidth: 120, padding: 11, borderRadius: 20, border: 'none', background: '#25d366', color: 'white', fontWeight: 600, cursor: 'pointer' }}>WhatsApp</button>
+              <button type="button" onClick={sms} style={{ flex: 1, minWidth: 90, padding: 11, borderRadius: 20, border: 'none', background: '#1a73e8', color: 'white', fontWeight: 600, cursor: 'pointer' }}>SMS</button>
+              <button type="button" onClick={copy} style={{ flex: 1, minWidth: 90, padding: 11, borderRadius: 20, border: '1px solid #ddd', background: 'white', fontWeight: 600, cursor: 'pointer' }}>Copy</button>
+            </div>
+            <button type="button" onClick={() => setInvite(null)} style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 20, border: 'none', background: 'transparent', color: '#8a7a65', fontWeight: 500, cursor: 'pointer' }}>Done</button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -464,7 +580,7 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [pos, setPos] = useState(JSON.parse(localStorage.getItem('clandeck_photo_pos') || '{"x":50,"y":50,"zoom":100}'));
   const [profileInfo, setProfileInfo] = useState({
     nickname: localStorage.getItem('profile_nickname') || '',
-    visibility: localStorage.getItem('profile_visibility') || 'public'
+    visibility: String(localStorage.getItem('profile_visibility') || 'public').toLowerCase()
   });
 
   useEffect(() => {
@@ -483,7 +599,7 @@ export default function Deck({ onGoProfile, onLogout }) {
       const p = JSON.parse(localStorage.getItem('clandeck_privacy') || '{}');
       setPrivacy(p);
       // If visibility is private, override
-      const vis = localStorage.getItem('profile_visibility') || 'public';
+      const vis = String(localStorage.getItem('profile_visibility') || 'public').toLowerCase();
       if (vis === 'private') setPrivacy(prev => ({...prev, showName: false}));
     } catch { setPrivacy({}); }
 
@@ -492,7 +608,7 @@ export default function Deck({ onGoProfile, onLogout }) {
 
     setProfileInfo({
       nickname: localStorage.getItem('profile_nickname') || '',
-      visibility: localStorage.getItem('profile_visibility') || 'public'
+      visibility: String(localStorage.getItem('profile_visibility') || 'public').toLowerCase()
     });
 
     const userId = storedUser?.id || storedUser?.uname || 'self';
@@ -531,9 +647,10 @@ export default function Deck({ onGoProfile, onLogout }) {
             setProfileInfo(prev => ({...prev, nickname: j.data.nickname}));
           }
           if (j.data.visibility) {
-            localStorage.setItem('profile_visibility', j.data.visibility);
-            setProfileInfo(prev => ({...prev, visibility: j.data.visibility}));
-            if (j.data.visibility === 'private') setPrivacy(prev => ({...prev, showName: false}));
+            const visNow = String(j.data.visibility).toLowerCase();
+            localStorage.setItem('profile_visibility', visNow);
+            setProfileInfo(prev => ({...prev, visibility: visNow}));
+            if (visNow === 'private') setPrivacy(prev => ({...prev, showName: false}));
           }
         }
       })
@@ -554,13 +671,14 @@ export default function Deck({ onGoProfile, onLogout }) {
   const isPublic = profileInfo.visibility === 'public' && privacy.showName !== false;
 
   return (
-    <div className="pg-font" style={{minHeight:'100vh', background:'#f7f4ef', width:'100vw'}}>
+    <div className="pg-font" style={{minHeight:'100vh', background:'#f7f4ef', width:'100%', maxWidth:'100%', overflowX:'hidden', boxSizing:'border-box'}}>
       <style>{`
         .pg-font :not(header):not(header *) { font-family: Arial, Helvetica, sans-serif; }
-        .deck-grid { display: grid; grid-template-columns: 300px 1fr 300px; gap: 16px; width: 100%; padding: 16px 20px; box-sizing: border-box; }
+        .deck-grid > * { min-width: 0; }
+        .deck-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 16px; width: 100%; padding: 16px 20px; box-sizing: border-box; }
         .card { background: #fffefb; border: 1px solid #e9e2d6; border-radius: 14px; padding: 18px; }
-        @media(max-width: 1100px){ .deck-grid { grid-template-columns: 300px 1fr; } }
-        @media(max-width: 700px){ .deck-grid { grid-template-columns: 1fr; padding: 12px; } }
+        @media(max-width: 1100px){ .deck-grid { grid-template-columns: 260px minmax(0, 1fr); } }
+        @media(max-width: 700px){ .deck-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } .deck-grid .ad-square { margin-left: auto; margin-right: auto; } }
       `}</style>
 
       <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} />
