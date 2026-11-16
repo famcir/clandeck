@@ -289,7 +289,9 @@ function PersonEditor({ profile, isSelf, storedUser, onSaved, onCancel }) {
 // =====================================================================
 // One family member row: photo, name, Edit and "Family" buttons
 // =====================================================================
-function PersonCard({ p, relation, onEdit, onOpen }) {
+function PersonCard({ p, relation, onEdit, onOpen, canEdit = true, showFamily = true, onUnlink }) {
+  // once someone has accepted (logged in with their own account) they edit their details and add their family themselves
+  const mayEdit = canEdit && !p.is_claimed;
   const img = p.photo_compressed_url || p.photo_url;
   const bits = [relation, p.gender, isGone(p) ? 'passed away' : null].filter(Boolean);
   return (
@@ -303,10 +305,17 @@ function PersonCard({ p, relation, onEdit, onOpen }) {
         </div>
         <div style={{ fontSize: '10px', color: '#8a7a65', marginTop: '2px' }}>{bits.join(' • ')}</div>
       </div>
-      <div style={{ display: 'flex', gap: '6px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '190px' }}>
-        <button type="button" onClick={() => onEdit(p)} style={smallBtn}>✏️ Edit</button>
-        <button type="button" onClick={() => onOpen(p, relation)} style={{ ...smallBtn, background: '#111', color: 'white', border: '1px solid #111' }}>Family →</button>
-      </div>
+      {mayEdit ? (
+        <div style={{ display: 'flex', gap: '6px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '190px' }}>
+          <button type="button" onClick={() => onEdit(p)} style={smallBtn}>✏️ Edit</button>
+          {showFamily && <button type="button" onClick={() => onOpen(p, relation)} style={{ ...smallBtn, background: '#111', color: 'white', border: '1px solid #111' }}>Family →</button>}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flex: '0 0 auto' }}>
+          <div style={{ fontSize: '10px', color: '#8a7a65' }}>Has own account</div>
+          {onUnlink && p.is_claimed && <button type="button" onClick={() => onUnlink(p)} style={{ ...smallBtn, fontSize: '10px', padding: '3px 8px', color: '#b3261e' }}>Remove link</button>}
+        </div>
+      )}
     </div>
   );
 }
@@ -343,6 +352,9 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   const [removePlan, setRemovePlan] = useState(null);        // preview of what removing a member will do
   const [tempLogin, setTempLogin] = useState(false);         // this login still uses a temporary password
   const [credsOpen, setCredsOpen] = useState(false);
+  const [shownUname, setShownUname] = useState(storedUser.uname || storedUser.username || storedUser.id || '');
+  const [groups, setGroups] = useState([]);                  // my groups (friends, school, college ...)
+  const [editMode, setEditMode] = useState('family');        // 'family' or 'group': decides which buttons the edit pop-up shows
   const [creds, setCreds] = useState({ current: '', uname: '', pass: '', pass2: '' });
 
   // ----- look for people who already exist while a name is typed in the Add pop-up -----
@@ -363,6 +375,27 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
     if (!userId) return;
     fetchJSON(`/api/account/status/${encodeURIComponent(userId)}`).then(({ data }) => setTempLogin(!!(data && data.is_temp))).catch(() => {});
   }, [userId]);
+
+  // ----- my groups (made on the Deck page) so the people in them can be edited here too -----
+  const loadGroups = async () => {
+    if (!userId) return;
+    try {
+      const { data } = await fetchJSON(`/api/groups?home_id=${encodeURIComponent(userId)}`);
+      if (data && data.success) setGroups(data.data || []);
+    } catch { /* groups are optional here */ }
+  };
+  useEffect(() => { loadGroups(); }, [userId]); // eslint-disable-line
+
+  const editFamily = (p) => { setEditMode('family'); setEditing(p); };
+  // a friend from a group: load the full profile first, then edit it exactly like a family member
+  const editGroupMember = async (m) => {
+    try {
+      const { data } = await fetchJSON(`/api/profile/${encodeURIComponent(m.id)}`);
+      setEditMode('group');
+      setEditing(data && data.success ? data.data : m);
+    } catch (e) { alert(e.message); }
+  };
+  const openGroupMember = async (m, groupName) => { await openFamily(m, groupName); };
 
   // ----- first load -----
   useEffect(() => {
@@ -453,6 +486,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
     setEditing(null);
     setTrail((t) => t.map((x) => (x.id === data.id ? { ...x, name: data.display_name || x.name } : x)));
     refreshFocus().catch(() => {});
+    loadGroups();
   };
 
   // ----- the invited person sets their own username / password -----
@@ -466,7 +500,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       });
       if (!res.ok || !res.data.success) throw new Error(res.data.error || 'Could not save');
       try { localStorage.setItem('user', JSON.stringify({ ...storedUser, uname: res.data.uname, username: res.data.uname, is_temp: 0 })); } catch { /* ignore */ }
-      setTempLogin(false); setCredsOpen(false); setCreds({ current: '', uname: '', pass: '', pass2: '' });
+      setShownUname(res.data.uname); setTempLogin(false); setCredsOpen(false); setCreds({ current: '', uname: '', pass: '', pass2: '' });
       alert('Saved. Use your new username and password next time you log in.');
     } catch (e) { alert(e.message); }
     setBusy(false);
@@ -533,6 +567,19 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
         {/* LEFT - YOUR PERSONAL DETAILS */}
         <div>
           <PersonEditor key={me.id} profile={me} isSelf storedUser={storedUser} onSaved={onSelfSaved} />
+
+          {/* LOGIN DETAILS: change username / password any time */}
+          <div style={{ ...cardStyle, marginTop: '12px' }}>
+            <b style={{ fontSize: '11px' }}>🔑 LOGIN DETAILS</b>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginTop: '10px' }}>
+              <div style={{ fontSize: '12px', minWidth: 0 }}>
+                <div style={{ color: '#8a7a65', fontSize: '10px', fontWeight: 600 }}>USERNAME</div>
+                <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{shownUname || '-'}</div>
+                <div style={{ color: '#8a7a65', fontSize: '10px', marginTop: '6px' }}>Password: ••••••••</div>
+              </div>
+              <button type="button" onClick={() => setCredsOpen(true)} style={{ ...pillBtn(true), padding: '9px 16px' }}>Change username / password</button>
+            </div>
+          </div>
         </div>
 
         {/* RIGHT - FAMILY */}
@@ -554,7 +601,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
             {!viewingMe && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '10px', background: '#faf7f2', border: '1px solid #e9e2d6', borderRadius: '12px', padding: '8px 12px' }}>
                 <span style={{ fontSize: '11px' }}>Adding family for <b>{focus.profile.display_name}</b></span>
-                <button type="button" onClick={() => setEditing(focus.profile)} style={smallBtn}>✏️ Edit details</button>
+                <button type="button" onClick={() => editFamily(focus.profile)} style={smallBtn}>✏️ Edit details</button>
               </div>
             )}
 
@@ -575,8 +622,8 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           {/* PARENTS */}
           <div style={{ ...cardStyle, marginTop: '12px' }}>
             <b style={{ fontSize: '11px' }}>PARENTS</b>
-            {fam.father && <PersonCard p={fam.father} relation="Father" onEdit={setEditing} onOpen={openFamily} />}
-            {fam.mother && <PersonCard p={fam.mother} relation="Mother" onEdit={setEditing} onOpen={openFamily} />}
+            {fam.father && <PersonCard p={fam.father} relation="Father" onEdit={editFamily} onOpen={openFamily} onUnlink={startRemove} />}
+            {fam.mother && <PersonCard p={fam.mother} relation="Mother" onEdit={editFamily} onOpen={openFamily} onUnlink={startRemove} />}
             {!fam.father && !fam.mother && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>None</div>}
           </div>
 
@@ -588,14 +635,14 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
               const kids = fam.children.filter((c) => String(c.spouse_group) === String(sp.spouse_group));
               return (
                 <div key={sp.id} style={{ background: '#faf7f2', border: '1px solid #e9e2d6', borderRadius: '14px', padding: '8px 10px 12px', marginTop: '10px' }}>
-                  <PersonCard p={sp} relation={fam.spouses.length > 1 ? `Spouse ${i + 1}` : 'Spouse'} onEdit={setEditing} onOpen={openFamily} />
+                  <PersonCard p={sp} relation={fam.spouses.length > 1 ? `Spouse ${i + 1}` : 'Spouse'} onEdit={editFamily} onOpen={openFamily} onUnlink={startRemove} />
                   <div style={{ marginLeft: '14px', paddingLeft: '12px', borderLeft: '2px solid #e9e2d6', marginTop: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                       <b style={{ fontSize: '10px' }}>CHILDREN WITH {String(sp.display_name || '').toUpperCase()} ({kids.length})</b>
                       <button type="button" onClick={() => openAdd('Child', sp.id)} style={smallBtn}>+ Add child</button>
                     </div>
                     {kids.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '6px' }}>None</div>}
-                    {kids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} />)}
+                    {kids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={editFamily} onOpen={openFamily} onUnlink={startRemove} />)}
                   </div>
                 </div>
               );
@@ -603,7 +650,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
             {otherKids.length > 0 && (
               <div style={{ marginTop: '14px' }}>
                 <b style={{ fontSize: '10px' }}>OTHER CHILDREN ({otherKids.length})</b>
-                {otherKids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={setEditing} onOpen={openFamily} />)}
+                {otherKids.map((c) => <PersonCard key={c.id} p={c} relation="Child" onEdit={editFamily} onOpen={openFamily} onUnlink={startRemove} />)}
               </div>
             )}
           </div>
@@ -612,8 +659,19 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
           <div style={{ ...cardStyle, marginTop: '12px' }}>
             <b style={{ fontSize: '11px' }}>SIBLINGS ({fam.siblings.length})</b>
             {fam.siblings.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>None</div>}
-            {fam.siblings.map((s) => <PersonCard key={s.id} p={s} relation="Sibling" onEdit={setEditing} onOpen={openFamily} />)}
+            {fam.siblings.map((s) => <PersonCard key={s.id} p={s} relation="Sibling" onEdit={editFamily} onOpen={openFamily} onUnlink={startRemove} />)}
           </div>
+
+          {/* MY GROUPS: friends, school, college ... edit them like family members */}
+          {viewingMe && groups.map((g) => (
+            <div key={g.id} style={{ ...cardStyle, marginTop: '12px' }}>
+              <b style={{ fontSize: '11px' }}>{({ friends: '👫', school: '🏫', college: '🎓' }[g.kind] || '⭐')} {String(g.name).toUpperCase()} ({g.members.length})</b>
+              {g.members.length === 0 && <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>No one yet. Add people from "My Groups" on your Deck page.</div>}
+              {g.members.map((m) => (
+                <PersonCard key={m.id} p={m} relation={g.name} canEdit={!!(m.owner_user_id && me && m.owner_user_id === me.owner_user_id)} showFamily={false} onEdit={editGroupMember} onOpen={openGroupMember} />
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -684,29 +742,34 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
         <Modal onClose={() => setEditing(null)} maxWidth={520}>
           <h3 style={{ fontWeight: 600, margin: '0 0 12px' }}>Edit {editing.display_name}</h3>
           <PersonEditor key={editing.id} profile={editing} isSelf={false} storedUser={storedUser} onSaved={onMemberSaved} onCancel={() => setEditing(null)} />
+          {editMode === 'group' ? (
+            <div style={{ marginTop: '14px', fontSize: '11px', color: '#8a7a65', textAlign: 'center' }}>To take this person out of the group, use ✕ in "My Groups" on your Deck page.</div>
+          ) : (
           <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #f0e9dc', textAlign: 'center' }}>
             <button type="button" disabled={busy} onClick={() => startRemove(editing)}
               style={{ padding: '10px 18px', borderRadius: '20px', border: '1px solid #ffd1d1', background: '#fff5f5', color: '#d33', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
               {busy ? 'Checking...' : '🗑 Remove from family'}
             </button>
           </div>
+          )}
         </Modal>
       )}
 
       {/* SET YOUR OWN LOGIN (for people who came in with a temporary one) */}
       {credsOpen && (
         <Modal onClose={() => !busy && setCredsOpen(false)} maxWidth={400}>
-          <h3 style={{ fontWeight: 600, margin: 0 }}>Set your own login</h3>
-          <label style={{ ...labelStyle, marginTop: '14px', display: 'block' }}>TEMPORARY PASSWORD (CURRENT)</label>
+          <h3 style={{ fontWeight: 600, margin: 0 }}>{tempLogin ? 'Set your own login' : 'Change username / password'}</h3>
+          {!tempLogin && <div style={{ fontSize: '11px', color: '#8a7a65', marginTop: '4px' }}>Fill in only what you want to change. You always need your current password.</div>}
+          <label style={{ ...labelStyle, marginTop: '14px', display: 'block' }}>{tempLogin ? 'TEMPORARY PASSWORD (CURRENT)' : 'CURRENT PASSWORD'}</label>
           <input type="password" value={creds.current} onChange={(e) => setCreds((c) => ({ ...c, current: e.target.value }))} style={inputStyle} autoComplete="current-password" />
-          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW USERNAME</label>
+          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW USERNAME {tempLogin ? '' : '(OPTIONAL)'}</label>
           <input value={creds.uname} onChange={(e) => setCreds((c) => ({ ...c, uname: e.target.value }))} placeholder="3-30 letters, numbers . _ -" style={inputStyle} autoComplete="username" />
-          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW PASSWORD</label>
+          <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>NEW PASSWORD {tempLogin ? '' : '(OPTIONAL)'}</label>
           <input type="password" value={creds.pass} onChange={(e) => setCreds((c) => ({ ...c, pass: e.target.value }))} placeholder="at least 6 characters" style={inputStyle} autoComplete="new-password" />
           <label style={{ ...labelStyle, marginTop: '12px', display: 'block' }}>REPEAT NEW PASSWORD</label>
           <input type="password" value={creds.pass2} onChange={(e) => setCreds((c) => ({ ...c, pass2: e.target.value }))} style={inputStyle} autoComplete="new-password" />
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-            <button type="button" onClick={() => setCredsOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>Later</button>
+            <button type="button" onClick={() => setCredsOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '20px', border: '1px solid #ddd', background: 'white', fontWeight: 500, cursor: 'pointer' }}>{tempLogin ? 'Later' : 'Cancel'}</button>
             <button type="button" disabled={busy} onClick={saveCreds} style={{ flex: 2, padding: '12px', borderRadius: '20px', border: 'none', background: 'black', color: 'white', fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Saving...' : 'Save'}</button>
           </div>
         </Modal>

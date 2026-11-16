@@ -791,7 +791,17 @@ app.post('/api/profiles/invite', async (req, res) => {
     if (P.id === home.id) return res.status(400).json({ success: false, error: 'That is you' });
 
     const fam = await collectFamily(pool, [home.id]);
-    if (!fam.has(P.id)) return res.status(403).json({ success: false, error: 'That person is not part of your family' });
+    let allowed = fam.has(P.id);
+    if (!allowed) {   // a friend from one of my groups (no family link) can be given a login too
+      try {
+        const [gs] = await pool.query(`SELECT id FROM profile_groups WHERE owner_profile_id = ?`, [home.id]);
+        if (gs.length) {
+          const [m] = await pool.query(`SELECT id FROM profile_group_members WHERE profile_id = ? AND group_id IN (${gs.map(() => '?').join(',')}) LIMIT 1`, [P.id, ...gs.map((g) => g.id)]);
+          allowed = m.length > 0;
+        }
+      } catch { /* group tables not set up yet */ }
+    }
+    if (!allowed) return res.status(403).json({ success: false, error: 'That person is not in your family or your groups' });
 
     const [ur] = await pool.query(`SELECT id, uname, is_temp, invited_by_user_id FROM users WHERE id = ? LIMIT 1`, [P.id]);
     const u = ur[0] || null;

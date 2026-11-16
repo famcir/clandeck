@@ -641,7 +641,7 @@ function AddMemberModal({ group, homeId, members, onClose, onChange }) {
   );
 }
 
-function GroupsCard({ groups, homeId, onChange, onOpen }) {
+function GroupsCard({ groups, homeId, ownerId, onChange, onOpen, onInvite }) {
   const [open, setOpen] = useState({});        // expanded groups
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState('');
@@ -709,6 +709,10 @@ function GroupsCard({ groups, homeId, onChange, onOpen }) {
                       <Avatar p={m} size={28} />
                       <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.display_name}</span>
                     </button>
+                    {!m.is_claimed && ownerId && m.owner_user_id === ownerId && (
+                      <button type="button" onClick={() => onInvite(m)} title={`Invite ${m.display_name} (temporary login by WhatsApp / SMS)`} aria-label={`Invite ${m.display_name}`}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, padding: '4px 5px' }}>📤</button>
+                    )}
                     <button type="button" onClick={() => removeMember(g, m)} title={`Remove ${m.display_name} from this group`} aria-label={`Remove ${m.display_name}`}
                       style={{ border: 'none', background: 'none', color: '#b0a088', cursor: 'pointer', fontSize: 13, padding: '4px 6px' }}>✕</button>
                   </div>
@@ -842,6 +846,7 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [groups, setGroups] = useState([]);
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
+  const [groupInvite, setGroupInvite] = useState(null);    // invite pop-up for a friend from My Groups
   const [openReq, setOpenReq] = useState(null);
   const [searchQ, setSearchQ] = useState('');             // what is typed in the header search box
   const [searchOpen, setSearchOpen] = useState(true);       // results panel shown (closes after a pick, opens again when you type)          // a group member was clicked -> show their tree
@@ -960,6 +965,7 @@ export default function Deck({ onGoProfile, onLogout }) {
       `}</style>
 
       <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} onSearch={(v) => { setSearchQ(v); setSearchOpen(true); }} />
+      {groupInvite && <InviteModal invite={groupInvite} setInvite={setGroupInvite} home={{ id: storedUser?.id || storedUser?.uname, display_name: storedUser?.name || storedUser?.Name || '' }} />}
       {searchOpen && <SearchPanel q={searchQ} homeId={storedUser?.id || storedUser?.uname} onClose={() => setSearchOpen(false)}
         onPick={(r) => { setSearchOpen(false); setOpenReq({ path: r.path, n: Date.now() }); }} />}
 
@@ -1012,7 +1018,7 @@ export default function Deck({ onGoProfile, onLogout }) {
         </div>
 
         <div>
-          <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />
+          <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} ownerId={storedUser?.id} onInvite={(m) => setGroupInvite({ person: m, mobile: '', result: null })} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />
           <div style={{marginTop:'16px'}}><AdSlot kind="square" /></div>
         </div>
       </div>
