@@ -353,16 +353,23 @@ app.get('/api/profiles/search', async (req, res) => {
 //   * a person you created only for a group, with no family links and no login, is cleaned up when you remove them
 // ---------------------------------------------------------------------------------------------
 const GROUP_KINDS = ['friends', 'school', 'college', 'custom'];
+// Uses YOUR existing tables profile_groups / profile_group_members. The first start only adds the columns that
+// are still missing (owner_profile_id, kind, is_default, visibility); nothing existing is changed or removed.
+// Rows that belong to the older design (no owner_profile_id) are simply ignored here.
 const groupsReady = (async () => {
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS profile_groups (
-      id VARCHAR(36) NOT NULL PRIMARY KEY,
-      owner_profile_id VARCHAR(36) NOT NULL,
-      name VARCHAR(80) NOT NULL,
-      kind VARCHAR(20) NOT NULL DEFAULT 'custom',
-      is_default TINYINT NOT NULL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE (owner_profile_id, name)
+      id VARCHAR(100) NOT NULL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      description TEXT NULL,
+      image_url TEXT NULL,
+      owner_user_id VARCHAR(100) NOT NULL,
+      privacy VARCHAR(20) NULL,
+      status VARCHAR(20) NULL,
+      member_count INT NULL,
+      invite_code VARCHAR(20) NULL,
+      created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
     )`);
     await pool.query(`CREATE TABLE IF NOT EXISTS profile_group_members (
       id VARCHAR(36) NOT NULL PRIMARY KEY,
@@ -372,9 +379,17 @@ const groupsReady = (async () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (group_id, profile_id)
     )`);
-    // 'private' = only me, 'family' = my relatives can find these people when they search (added later, so also patched in)
-    try { await pool.query(`ALTER TABLE profile_groups ADD COLUMN visibility VARCHAR(10) NOT NULL DEFAULT 'private'`); } catch { /* already there */ }
-    for (const ix of [`CREATE INDEX idx_pgm_profile ON profile_group_members (profile_id)`]) { try { await pool.query(ix); } catch { /* already there */ } }
+    // columns this feature needs (a failure here just means the column is already there)
+    for (const col of [
+      `owner_profile_id VARCHAR(36) NULL`,
+      `kind VARCHAR(20) NOT NULL DEFAULT 'custom'`,
+      `is_default TINYINT NOT NULL DEFAULT 0`,
+      `visibility VARCHAR(10) NOT NULL DEFAULT 'private'`,   // 'private' = only me, 'family' = relatives can find these people by searching
+    ]) { try { await pool.query(`ALTER TABLE profile_groups ADD COLUMN ${col}`); } catch { /* already there */ } }
+    for (const ix of [
+      `CREATE INDEX idx_pg_owner_profile ON profile_groups (owner_profile_id)`,
+      `CREATE INDEX idx_pgm_profile ON profile_group_members (profile_id)`,
+    ]) { try { await pool.query(ix); } catch { /* already there */ } }
   } catch (e) { console.error('group tables:', e.message); }
 })();
 
@@ -390,7 +405,7 @@ const loadGroups = async (home) => {
   let [gs] = await pool.query(`SELECT * FROM profile_groups WHERE owner_profile_id = ? ORDER BY is_default DESC, created_at, name`, [home.id]);
   if (!gs.some((g) => g.is_default)) {
     try {
-      await pool.query(`INSERT INTO profile_groups (id, owner_profile_id, name, kind, is_default) VALUES (UUID(), ?, 'My Friends', 'friends', 1)`, [home.id]);
+      await pool.query(`INSERT INTO profile_groups (id, owner_user_id, owner_profile_id, name, kind, is_default) VALUES (UUID(), ?, ?, 'My Friends', 'friends', 1)`, [home.owner_user_id || home.id, home.id]);
     } catch { /* made by a parallel request */ }
     [gs] = await pool.query(`SELECT * FROM profile_groups WHERE owner_profile_id = ? ORDER BY is_default DESC, created_at, name`, [home.id]);
   }
@@ -443,7 +458,7 @@ app.post('/api/groups', async (req, res) => {
     const [same] = await pool.query(`SELECT id FROM profile_groups WHERE owner_profile_id = ? AND LOWER(name) = LOWER(?) LIMIT 1`, [home.id, name]);
     if (same.length) return res.status(409).json({ success: false, error: 'You already have a group with that name' });
     try {
-      await pool.query(`INSERT INTO profile_groups (id, owner_profile_id, name, kind, is_default) VALUES (UUID(), ?, ?, ?, 0)`, [home.id, name, kind]);
+      await pool.query(`INSERT INTO profile_groups (id, owner_user_id, owner_profile_id, name, kind, is_default) VALUES (UUID(), ?, ?, ?, ?, 0)`, [home.owner_user_id || home.id, home.id, name, kind]);
     } catch { return res.status(409).json({ success: false, error: 'You already have a group with that name' }); }
     res.json({ success: true, data: await loadGroups(home) });
   } catch (e) { console.error('group create error:', e); res.status(500).json({ success: false, error: e.message }); }
