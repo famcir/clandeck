@@ -630,7 +630,13 @@ app.get('/api/search', async (req, res) => {
       }
     }
 
-    const list = [...hits.entries()].sort((a, b) => a[1].path.length - b[1].path.length).slice(0, 15);
+    // 3) every other member with an account (public profiles only) - opened in view-only mode
+    const [others] = await pool.query(
+      `SELECT id FROM profiles WHERE is_claimed = 1 AND id <> ? AND LOWER(COALESCE(visibility, 'public')) <> 'private' AND (display_name LIKE ? OR nickname LIKE ?) LIMIT 30`, [home.id, like, like]);
+    others.forEach((r) => { if (!hits.has(r.id)) hits.set(r.id, { kind: 'member', path: [{ id: r.id, rel: 'Member' }] }); });
+
+    const rank = (k) => (k === 'family' ? 0 : k === 'group' ? 1 : 2);
+    const list = [...hits.entries()].sort((a, b) => rank(a[1].kind) - rank(b[1].kind) || a[1].path.length - b[1].path.length).slice(0, 20);
     const need = [...new Set(list.flatMap(([, h]) => h.path.map((x) => x.id)))];
     const pmap = new Map();
     if (need.length) {

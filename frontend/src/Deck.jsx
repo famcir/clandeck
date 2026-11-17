@@ -274,7 +274,7 @@ function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
  *  - Line view: same tree, but the path you followed stays on top as a connected line
  *    (You → Father → Father's sibling → ...). Click any earlier person on the path to jump back to them.
  */
-function FamilyTree({ userId, onFocus, openReq }) {
+function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
   const D = useDims();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('clandeck_tree_view') === 'line' ? 'line' : 'tree'; } catch { return 'tree'; }
@@ -384,7 +384,7 @@ function FamilyTree({ userId, onFocus, openReq }) {
 
   const chipY = 14 + D.TH / 2;
   const cxOf = (i) => W / 2 - (T - 1 - i) * (D.TW + D.EW);
-  const canInvite = (p) => !!(p && home && !p.is_claimed && p.id !== home.id && p.owner_user_id && p.owner_user_id === home.owner_user_id);
+  const canInvite = (p) => !readOnly && !!(p && home && !p.is_claimed && p.id !== home.id && p.owner_user_id && p.owner_user_id === home.owner_user_id);
   const profileOf = (item, i) => item.p || (i === 0 ? home : null);
 
   return (
@@ -393,7 +393,7 @@ function FamilyTree({ userId, onFocus, openReq }) {
         <button type="button" onClick={() => chooseView('tree')} style={navBtn(!lineMode)}>🌳 Tree view</button>
         <button type="button" onClick={() => chooseView('line')} style={navBtn(lineMode)}>➖ Line view</button>
         <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={back}>← Back</button>
-        <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={goHome}>⌂ My tree</button>
+        <button type="button" style={navBtn(false, atHome)} disabled={atHome} onClick={goHome}>{readOnly ? '⌂ Start' : '⌂ My tree'}</button>
         <span style={{ fontSize: 12, fontWeight: 600, color: '#8a7a5c' }}>
           {data ? <>Showing <span style={{ color: '#1a1a1a' }}>{data.myProfile.display_name}</span>{atHome ? '' : "'s family"} · tap anyone to open their tree</> : ''}
         </span>
@@ -765,6 +765,7 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
 
   const how = (r) => {
     const names = r.path.slice(0, -1).map((x) => x.p.display_name.split(' ')[0]);
+    if (r.kind === 'member') return 'Member · view profile';
     if (r.kind === 'group') return `${r.owner ? `${r.owner}'s` : 'Your'} group · ${r.group}`;
     return r.path.map((x) => x.rel).join(' › ') + (names.length ? ` (via ${names.join(' › ')})` : '');
   };
@@ -774,7 +775,7 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
       <div className="search-panel" role="listbox" style={{ position: 'fixed', zIndex: 9001, left: '50%', transform: 'translateX(-50%)', width: 'min(560px, 94vw)', maxHeight: '60vh', overflowY: 'auto', background: '#fff', border: '1px solid #e9e2d6', borderRadius: 14, boxShadow: '0 10px 30px rgba(0,0,0,.18)', padding: 6 }}>
         <style>{`.search-panel{ top: 58px; } @media(max-width: 900px){ .search-panel{ top: 128px; } }`}</style>
         {rows === null && <div style={{ padding: 12, fontSize: 12, color: '#8a7a65' }}>Searching...</div>}
-        {rows && rows.length === 0 && <div style={{ padding: 12, fontSize: 12, color: '#8a7a65' }}>Nobody found in your family or groups.</div>}
+        {rows && rows.length === 0 && <div style={{ padding: 12, fontSize: 12, color: '#8a7a65' }}>Nobody found.</div>}
         {rows && rows.map((r) => (
           <button key={r.person.id} type="button" onClick={() => onPick(r)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: 'none', background: 'none', borderRadius: 10, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
             <Avatar p={r.person} size={36} />
@@ -782,7 +783,7 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
               <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.person.display_name}</span>
               <span style={{ display: 'block', fontSize: 11, color: '#8a7a5c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{how(r)}</span>
             </span>
-            <span style={{ fontSize: 10, color: '#8a7a65', flexShrink: 0 }}>{r.kind === 'group' ? '👥' : '🌳'}</span>
+            <span style={{ fontSize: 10, color: '#8a7a65', flexShrink: 0 }}>{r.kind === 'group' ? '👥' : r.kind === 'member' ? '👤' : '🌳'}</span>
           </button>
         ))}
       </div>
@@ -847,6 +848,7 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
   const [groupInvite, setGroupInvite] = useState(null);    // invite pop-up for a friend from My Groups
+  const [viewing, setViewing] = useState(null);           // a member opened from search: view-only profile
   const [openReq, setOpenReq] = useState(null);
   const [searchQ, setSearchQ] = useState('');             // what is typed in the header search box
   const [searchOpen, setSearchOpen] = useState(true);       // results panel shown (closes after a pick, opens again when you type)          // a group member was clicked -> show their tree
@@ -967,9 +969,16 @@ export default function Deck({ onGoProfile, onLogout }) {
       <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} onSearch={(v) => { setSearchQ(v); setSearchOpen(true); }} />
       {groupInvite && <InviteModal invite={groupInvite} setInvite={setGroupInvite} home={{ id: storedUser?.id || storedUser?.uname, display_name: storedUser?.name || storedUser?.Name || '' }} />}
       {searchOpen && <SearchPanel q={searchQ} homeId={storedUser?.id || storedUser?.uname} onClose={() => setSearchOpen(false)}
-        onPick={(r) => { setSearchOpen(false); setOpenReq({ path: r.path, n: Date.now() }); }} />}
+        onPick={(r) => { setSearchOpen(false); if (r.kind === 'member') { setViewing(r.person); window.scrollTo({ top: 0 }); } else { setViewing(null); setOpenReq({ path: r.path, n: Date.now() }); } }} />}
 
-      {tempLogin && (
+      {viewing && (
+        <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#eef4ff', border:'1px solid #c9daf8', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
+          <span style={{flex:1, minWidth:0}}>👁 You are viewing <b>{viewing.display_name}</b>'s profile (view only)</span>
+          <button type="button" onClick={() => setViewing(null)} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight: 500, fontSize:'11px', cursor:'pointer'}}>← Back to my deck</button>
+        </div>
+      )}
+
+      {!viewing && tempLogin && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
           <span style={{flex:1, minWidth:200}}>🔑 You are using a <b>temporary login</b>. Please set your own username and password in Profile Edit.</span>
           <button onClick={onGoProfile} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight: 500, fontSize:'11px', cursor:'pointer'}}>Set now</button>
@@ -978,6 +987,15 @@ export default function Deck({ onGoProfile, onLogout }) {
 
       <div className="deck-grid">
         <div>
+          {viewing ? (
+            <div className="card" style={{textAlign:'center'}}>
+              <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
+                {viewing.photo_url ? <img src={viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : (viewing.display_name || '?')[0].toUpperCase()}
+              </div>
+              <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px', wordBreak:'break-word'}}>{viewing.display_name}{viewing.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({viewing.nickname})</span>}</h2>
+              <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>Member of ClanDeck</p>
+            </div>
+          ) : (
           <div className="card" style={{textAlign:'center'}}>
             <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
               {photoUrl ? <img src={photoUrl} alt="profile" style={{width:'100%', height:'100%', objectFit:'cover', objectPosition: `${pos.x}% ${pos.y}%`, transform: `scale(${pos.zoom/100})`}} onError={()=>setPhotoUrl('')} /> : getName()[0]?.toUpperCase()}
@@ -1002,11 +1020,17 @@ export default function Deck({ onGoProfile, onLogout }) {
               </>
             )}
           </div>
+          )}
         </div>
 
         <div style={{minWidth:0}}>
           <div style={{marginBottom:'12px'}}><AdSlot kind="banner" /></div>
-          {privacy.showFamilyTree!==false ? (
+          {viewing ? (
+            <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
+              <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.display_name.split(' ')[0]}'s Family Tree</div>
+              <FamilyTree key={viewing.id} userId={viewing.id} readOnly />
+            </div>
+          ) : privacy.showFamilyTree!==false ? (
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <span style={{fontWeight: 600, fontSize:'13px'}}>{isPublic ? getName().split(' ')[0] : 'Hidden'}'s Family Tree {isPublic && profileInfo.nickname ? `(${profileInfo.nickname})` : ''}</span>
@@ -1018,8 +1042,8 @@ export default function Deck({ onGoProfile, onLogout }) {
         </div>
 
         <div>
-          <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} ownerId={storedUser?.id} onInvite={(m) => setGroupInvite({ person: m, mobile: '', result: null })} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />
-          <div style={{marginTop:'16px'}}><AdSlot kind="square" /></div>
+          {!viewing && <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} ownerId={storedUser?.id} onInvite={(m) => setGroupInvite({ person: m, mobile: '', result: null })} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />}
+          <div style={{marginTop: viewing ? 0 : '16px'}}><AdSlot kind="square" /></div>
         </div>
       </div>
 
