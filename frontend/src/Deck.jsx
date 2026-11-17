@@ -300,7 +300,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
     if (!focusId) return;
     let alive = true;
     setLoading(true); setError('');
-    fetch(`${API_URL}/api/profiles/family-tree?user_id=${encodeURIComponent(focusId)}`)
+    fetch(`${API_URL}/api/profiles/family-tree?user_id=${encodeURIComponent(focusId)}${readOnly || focusId !== userId ? '&exact=1' : ''}`)
       .then((r) => r.json())
       .then((j) => {
         if (!alive) return;
@@ -1012,7 +1012,7 @@ export default function Deck({ onGoProfile, onLogout }) {
           {viewing ? (
             <div className="card" style={{textAlign:'center'}}>
               <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
-                {(viewInfo && viewInfo.photo_url) || viewing.photo_url ? <img src={(viewInfo && viewInfo.photo_url) || viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover', objectPosition: `${viewInfo ? viewInfo.photo_x : 50}% ${viewInfo ? viewInfo.photo_y : 50}%`, transform: `scale(${(viewInfo ? viewInfo.photo_zoom : 100) / 100})`}} /> : (viewing.display_name || '?')[0].toUpperCase()}
+                {(viewInfo && viewInfo.photo_url) || viewing.photo_url ? <img src={(viewInfo && viewInfo.photo_url) || viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : (viewing.display_name || '?')[0].toUpperCase()}
               </div>
               <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px', wordBreak:'break-word'}}>{viewing.display_name}{viewing.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({viewing.nickname})</span>}</h2>
               <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>{viewInfo && viewInfo.uname ? `@${viewInfo.uname}` : (viewing.is_claimed ? 'Member of ClanDeck' : 'Added by a relative or friend')}</p>

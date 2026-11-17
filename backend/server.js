@@ -142,7 +142,10 @@ app.get('/api/profiles/family-tree', async (req, res) => {
   try {
     const { user_id } = req.query;
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
-    const [myRows] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [user_id, user_id, user_id]);
+    // exact=1: the id is a PROFILE id (viewing someone else), never fall back to "the profile claimed by this user id"
+    const [myRows] = req.query.exact === '1'
+      ? await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [user_id])
+      : await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [user_id, user_id, user_id]);
     if (myRows.length === 0) return res.status(404).json({ success: false, error: 'Profile not found' });
     const myProfile = myRows[0]; const myProfileId = myProfile.id;
     const [relations] = await pool.query(`SELECT * FROM profile_relations WHERE owner_profile_id = ? ORDER BY CAST(spouse_group AS UNSIGNED) ASC, birth_order ASC`, [myProfileId]);
@@ -660,7 +663,7 @@ app.get('/api/search', async (req, res) => {
 // ---------------------------------------------------------------------------------------------
 app.get('/api/profiles/public/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [req.params.id, req.params.id, req.params.id]);
+    const [rows] = await pool.query(`SELECT * FROM profiles WHERE id = ? LIMIT 1`, [req.params.id]);
     const P = rows[0];
     if (!P) return res.status(404).json({ success: false, error: 'Profile not found' });
     if (String(P.visibility || 'public').toLowerCase() === 'private') {
