@@ -655,6 +655,30 @@ app.get('/api/search', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// VIEW another member's profile (read-only, safe fields only: no email, phone or password).
+// A private profile is shown only to people in that person's family.
+// ---------------------------------------------------------------------------------------------
+app.get('/api/profiles/public/:id', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT * FROM profiles WHERE id = ? OR (owner_user_id = ? AND is_claimed = 1) ORDER BY (id = ?) DESC LIMIT 1`, [req.params.id, req.params.id, req.params.id]);
+    const P = rows[0];
+    if (!P) return res.status(404).json({ success: false, error: 'Profile not found' });
+    if (String(P.visibility || 'public').toLowerCase() === 'private') {
+      const viewer = await groupHome(String(req.query.home_id || '')).catch(() => null);
+      const fam = viewer ? await collectFamily(pool, [viewer.id]) : new Set();
+      if (!viewer || (viewer.id !== P.id && !fam.has(P.id))) return res.status(403).json({ success: false, error: 'This profile is private' });
+    }
+    let uname = '';
+    try { const [u] = await pool.query(`SELECT uname FROM users WHERE id = ? OR id = ? LIMIT 1`, [P.id, P.owner_user_id]); uname = (u[0] && u[0].uname) || ''; } catch { /* no users row */ }
+    res.json({ success: true, data: {
+      id: P.id, display_name: P.display_name, nickname: P.nickname || '', gender: P.gender || '', uname,
+      dob: P.dob || null, location: P.location || '', bio: P.bio || '', is_alive: P.is_alive === 0 || P.is_alive === '0' ? 0 : 1, dod: P.dod || null,
+      photo_url: cleanPhoto(P), photo_x: P.photo_x ?? 50, photo_y: P.photo_y ?? 50, photo_zoom: P.photo_zoom ?? 100, is_claimed: P.is_claimed ? 1 : 0,
+    } });
+  } catch (e) { console.error('public profile error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------------------------
 // REMOVE a family member. Call with confirm:false for a preview (nothing changes), confirm:true to do it.
 //   * only people YOU added (and who have not claimed their own account) are really deleted
 //   * a person who claimed their own account is only UNLINKED from this family, never deleted

@@ -841,6 +841,12 @@ function AdSlot({ kind, style }) {
 
 // ================= DECK PAGE =================
 
+const fmtDate = (d) => {
+  if (!d) return '';
+  const t = new Date(d);
+  return Number.isNaN(t.getTime()) ? String(d).slice(0, 10) : t.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 export default function Deck({ onGoProfile, onLogout }) {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const [family, setFamily] = useState([]);
@@ -849,6 +855,16 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [showChat, setShowChat] = useState(false);
   const [groupInvite, setGroupInvite] = useState(null);    // invite pop-up for a friend from My Groups
   const [viewing, setViewing] = useState(null);           // a member opened from search: view-only profile
+  const [viewInfo, setViewInfo] = useState(null);         // that member's full public details
+  useEffect(() => {
+    setViewInfo(null);
+    if (!viewing) return undefined;
+    let dead = false;
+    fetch(`${API_URL}/api/profiles/public/${encodeURIComponent(viewing.id)}?home_id=${encodeURIComponent(storedUser.id || storedUser.uname || '')}`)
+      .then((r) => r.json()).then((j) => { if (!dead) setViewInfo(j.success ? j.data : { error: j.error || 'Could not load profile' }); })
+      .catch(() => { if (!dead) setViewInfo({ error: 'Could not load profile' }); });
+    return () => { dead = true; };
+  }, [viewing]); // eslint-disable-line
   const [openReq, setOpenReq] = useState(null);
   const [searchQ, setSearchQ] = useState('');             // what is typed in the header search box
   const [searchOpen, setSearchOpen] = useState(true);       // results panel shown (closes after a pick, opens again when you type)          // a group member was clicked -> show their tree
@@ -990,10 +1006,23 @@ export default function Deck({ onGoProfile, onLogout }) {
           {viewing ? (
             <div className="card" style={{textAlign:'center'}}>
               <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
-                {viewing.photo_url ? <img src={viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : (viewing.display_name || '?')[0].toUpperCase()}
+                {(viewInfo && viewInfo.photo_url) || viewing.photo_url ? <img src={(viewInfo && viewInfo.photo_url) || viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover', objectPosition: `${viewInfo ? viewInfo.photo_x : 50}% ${viewInfo ? viewInfo.photo_y : 50}%`, transform: `scale(${(viewInfo ? viewInfo.photo_zoom : 100) / 100})`}} /> : (viewing.display_name || '?')[0].toUpperCase()}
               </div>
               <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px', wordBreak:'break-word'}}>{viewing.display_name}{viewing.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({viewing.nickname})</span>}</h2>
-              <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>Member of ClanDeck</p>
+              <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>{viewInfo && viewInfo.uname ? `@${viewInfo.uname}` : 'Member of ClanDeck'}</p>
+              {viewInfo && !viewInfo.error && (
+                <div style={{marginTop:'14px', textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
+                  {[
+                    ['GENDER', viewInfo.gender],
+                    ['BORN', fmtDate(viewInfo.dob)],
+                    ['STATUS', viewInfo.is_alive ? 'Living' : (viewInfo.dod ? `Passed away ${fmtDate(viewInfo.dod)}` : 'Passed away')],
+                    ['LOCATION', viewInfo.location],
+                  ].filter(([, v]) => v).map(([k, v]) => (
+                    <div key={k} style={{display:'flex', justifyContent:'space-between', gap:8, marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>{k}</span><span style={{fontWeight: 500, textAlign:'right', wordBreak:'break-word'}}>{v}</span></div>
+                  ))}
+                </div>
+              )}
+              {viewInfo && viewInfo.error && <p style={{fontSize:'12px', color:'#b3261e', marginTop:10}}>{viewInfo.error}</p>}
             </div>
           ) : (
           <div className="card" style={{textAlign:'center'}}>
@@ -1026,10 +1055,18 @@ export default function Deck({ onGoProfile, onLogout }) {
         <div style={{minWidth:0}}>
           <div style={{marginBottom:'12px'}}><AdSlot kind="banner" /></div>
           {viewing ? (
+            <>
+            {viewInfo && viewInfo.bio && (
+              <div className="card" style={{marginBottom:'12px'}}>
+                <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:6}}>ABOUT {viewing.display_name.split(' ')[0].toUpperCase()}</div>
+                <p style={{margin:0, fontSize:'13px', lineHeight:'19px', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{viewInfo.bio}</p>
+              </div>
+            )}
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.display_name.split(' ')[0]}'s Family Tree</div>
               <FamilyTree key={viewing.id} userId={viewing.id} readOnly />
             </div>
+            </>
           ) : privacy.showFamilyTree!==false ? (
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
