@@ -239,7 +239,7 @@ function Person({ node, D, isLogin, onPick }) {
 function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
   const [imgOk, setImgOk] = useState(true);
   const src = photoOf(p);
-  const sub = index === 0 ? 'You' : isLast ? 'Showing' : item.rel;
+  const sub = index === 0 ? (isLogin ? 'You' : '') : isLast ? 'Showing' : item.rel;
   return (
     <button
       type="button"
@@ -308,7 +308,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
         famCache.current[focusId] = j.family || {};
         if (j.myProfile) famCache.current[j.myProfile.id] = j.family || {};
         setData(j);
-        if (focusId === userId) { setHome(j.myProfile); setMyProfileId(j.myProfile.id); }
+        if (focusId === userId) { setHome(j.myProfile); if (!readOnly) setMyProfileId(j.myProfile.id); }
         if (onFocus) onFocus(j.myProfile);
       })
       .catch((e) => alive && setError(e.message))
@@ -985,11 +985,17 @@ export default function Deck({ onGoProfile, onLogout }) {
       <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} onSearch={(v) => { setSearchQ(v); setSearchOpen(true); }} />
       {groupInvite && <InviteModal invite={groupInvite} setInvite={setGroupInvite} home={{ id: storedUser?.id || storedUser?.uname, display_name: storedUser?.name || storedUser?.Name || '' }} />}
       {searchOpen && <SearchPanel q={searchQ} homeId={storedUser?.id || storedUser?.uname} onClose={() => setSearchOpen(false)}
-        onPick={(r) => { setSearchOpen(false); if (r.kind === 'member') { setViewing(r.person); window.scrollTo({ top: 0 }); } else { setViewing(null); setOpenReq({ path: r.path, n: Date.now() }); } }} />}
+        onPick={(r) => {
+          setSearchOpen(false);
+          // every search result opens that person's profile (view only); the path from me is shown above it
+          const way = r.kind === 'member' ? '' : ['You', ...r.path.map((x) => `${x.rel ? x.rel + ': ' : ''}${x.p.display_name}`)].join(' › ');
+          setViewing({ ...r.person, way });
+          window.scrollTo({ top: 0 });
+        }} />}
 
       {viewing && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#eef4ff', border:'1px solid #c9daf8', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
-          <span style={{flex:1, minWidth:0}}>👁 You are viewing <b>{viewing.display_name}</b>'s profile (view only)</span>
+          <span style={{flex:1, minWidth:0}}>👁 You are viewing <b>{viewing.display_name}</b>'s profile (view only){viewing.way && <span style={{display:'block', fontSize:'11px', color:'#5a6b8a', marginTop:2, wordBreak:'break-word'}}>{viewing.way}</span>}</span>
           <button type="button" onClick={() => setViewing(null)} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight: 500, fontSize:'11px', cursor:'pointer'}}>← Back to my deck</button>
         </div>
       )}
@@ -1009,7 +1015,7 @@ export default function Deck({ onGoProfile, onLogout }) {
                 {(viewInfo && viewInfo.photo_url) || viewing.photo_url ? <img src={(viewInfo && viewInfo.photo_url) || viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover', objectPosition: `${viewInfo ? viewInfo.photo_x : 50}% ${viewInfo ? viewInfo.photo_y : 50}%`, transform: `scale(${(viewInfo ? viewInfo.photo_zoom : 100) / 100})`}} /> : (viewing.display_name || '?')[0].toUpperCase()}
               </div>
               <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px', wordBreak:'break-word'}}>{viewing.display_name}{viewing.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({viewing.nickname})</span>}</h2>
-              <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>{viewInfo && viewInfo.uname ? `@${viewInfo.uname}` : 'Member of ClanDeck'}</p>
+              <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>{viewInfo && viewInfo.uname ? `@${viewInfo.uname}` : (viewing.is_claimed ? 'Member of ClanDeck' : 'Added by a relative or friend')}</p>
               {viewInfo && !viewInfo.error && (
                 <div style={{marginTop:'14px', textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
                   {[
@@ -1062,6 +1068,14 @@ export default function Deck({ onGoProfile, onLogout }) {
                 <p style={{margin:0, fontSize:'13px', lineHeight:'19px', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{viewInfo.bio}</p>
               </div>
             )}
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'12px', marginBottom:'12px'}}>
+              {[['🖼 GALLERY', 'Photos and videos will appear here.'], ['📝 WALL', 'Scraps and posts will appear here.']].map(([t, d]) => (
+                <div key={t} className="card" style={{minWidth:0}}>
+                  <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:6}}>{t}</div>
+                  <p style={{margin:0, fontSize:'12px', color:'#aaa'}}>{d} <i>(coming soon)</i></p>
+                </div>
+              ))}
+            </div>
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.display_name.split(' ')[0]}'s Family Tree</div>
               <FamilyTree key={viewing.id} userId={viewing.id} readOnly />
