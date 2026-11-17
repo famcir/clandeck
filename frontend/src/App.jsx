@@ -4,6 +4,7 @@ import Login from './Login.jsx';
 import AdminDB from './AdminDB.jsx';
 import Deck from './Deck.jsx';
 import ProfileEdit from './ProfileEdit.jsx';
+import NotificationWall from './NotificationWall.jsx';
 
 function ProtectedAdminRoute({ children }) {
   const userStr = localStorage.getItem('user');
@@ -30,6 +31,7 @@ function DeckWrapper() {
     <Deck 
       onGoProfile={() => navigate('/profile-edit')}
       onGoDeck={() => navigate('/deck')}
+      onGoNotifications={() => navigate('/notifications')}
       onLogout={() => { localStorage.clear(); navigate('/login'); }}
     />
   );
@@ -39,6 +41,17 @@ function ProfileEditWrapper() {
   const navigate = useNavigate();
   return (
     <ProfileEdit 
+      onGoDeck={() => navigate('/deck')}
+      onGoProfile={() => navigate('/profile-edit')}
+      onLogout={() => { localStorage.clear(); navigate('/login'); }}
+    />
+  );
+}
+
+function NotificationWallWrapper() {
+  const navigate = useNavigate();
+  return (
+    <NotificationWall
       onGoDeck={() => navigate('/deck')}
       onGoProfile={() => navigate('/profile-edit')}
       onLogout={() => { localStorage.clear(); navigate('/login'); }}
@@ -82,6 +95,7 @@ export default function App() {
         
         <Route path="/deck" element={<ProtectedRoute><DeckWrapper /></ProtectedRoute>} />
         <Route path="/profile-edit" element={<ProtectedRoute><ProfileEditWrapper /></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute><NotificationWallWrapper /></ProtectedRoute>} />
         <Route path="/profile" element={<Navigate to="/profile-edit" replace />} />
         
         <Route path="/construction" element={<Construction />} />
