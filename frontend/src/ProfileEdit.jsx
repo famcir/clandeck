@@ -333,7 +333,7 @@ function Modal({ children, onClose, maxWidth = 400 }) {
 // =====================================================================
 // The page
 // =====================================================================
-export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
+export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck, onGoNotifications }) {
   const storedUser = useMemo(() => { try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; } }, []);
   const userId = storedUser?.id;
 
@@ -554,7 +554,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
   return (
     <div className="pg-font" style={{ minHeight: '100vh', width: '100%', maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box', background: '#f7f4ef' }}>
       <style>{`.pg-font :not(header):not(header *) { font-family: Arial, Helvetica, sans-serif; }`}</style>
-      <CommonHeader self={storedUser} page="profile-edit" onDeck={onGoDeck} onProfile={onGoProfile} onLogout={onLogout} />
+      <CommonHeader self={storedUser} page="profile-edit" onDeck={onGoDeck} onProfile={onGoProfile} onNotifications={onGoNotifications} onLogout={onLogout} />
       {tempLogin && (
         <div style={{ margin: '12px 24px 0', padding: '10px 14px', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '13px' }}>
           <span style={{ flex: 1, minWidth: 200 }}>🔑 You are using a <b>temporary login</b>. Please set your own username and password.</span>

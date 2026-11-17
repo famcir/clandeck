@@ -910,7 +910,7 @@ const fmtDate = (d) => {
   return Number.isNaN(t.getTime()) ? String(d).slice(0, 10) : t.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-export default function Deck({ onGoProfile, onLogout }) {
+export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const [family, setFamily] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -950,6 +950,14 @@ export default function Deck({ onGoProfile, onLogout }) {
     } catch { /* groups stay empty; the rest of the page still works */ }
   }, []); // eslint-disable-line
   useEffect(() => { loadGroups(); }, [loadGroups]);
+
+  // "View profile" on the Notification wall page sends the person here
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('clandeck_open_profile');
+      if (raw) { sessionStorage.removeItem('clandeck_open_profile'); setViewing({ ...JSON.parse(raw), way: '' }); }
+    } catch { /* ignore */ }
+  }, []);
 
   const loadNotes = useCallback(async () => {
     const home = encodeURIComponent(storedUser.id || storedUser.uname || '');
@@ -1072,7 +1080,7 @@ export default function Deck({ onGoProfile, onLogout }) {
         @media(max-width: 700px){ .deck-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } .deck-grid .ad-square { margin-left: auto; margin-right: auto; } }
       `}</style>
 
-      <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onLogout={onLogout} onSearch={(v) => { setSearchQ(v); setSearchOpen(true); }} />
+      <CommonHeader self={storedUser} page="deck" onDeck={()=>{}} onProfile={onGoProfile} onNotifications={onGoNotifications} onLogout={onLogout} onSearch={(v) => { setSearchQ(v); setSearchOpen(true); }} />
       {groupInvite && <InviteModal invite={groupInvite} setInvite={setGroupInvite} home={{ id: storedUser?.id || storedUser?.uname, display_name: storedUser?.name || storedUser?.Name || '' }} />}
       {searchOpen && <SearchPanel q={searchQ} homeId={storedUser?.id || storedUser?.uname} onClose={() => setSearchOpen(false)}
         onPick={(r) => {

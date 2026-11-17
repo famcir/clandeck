@@ -42,6 +42,7 @@ function ProfileEditWrapper() {
   return (
     <ProfileEdit 
       onGoDeck={() => navigate('/deck')}
+      onGoNotifications={() => navigate('/notifications')}
       onGoProfile={() => navigate('/profile-edit')}
       onLogout={() => { localStorage.clear(); navigate('/login'); }}
     />

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import clandeckLogo from './assets/clandeck_h.png';
 
-export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSearch, page }) {
+const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
+
+export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSearch, onNotifications, page }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -11,6 +13,30 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
   let savedPhoto = '';
   try { const ph = localStorage.getItem('photo_url') || ''; savedPhoto = ph.startsWith('blob:') ? '' : ph; } catch { /* ignore */ }
   const [photoOk, setPhotoOk] = useState(true);
+
+  // 🔔 number of requests / notices waiting for this person (checked on load, every minute, and when the tab is shown again)
+  const [unread, setUnread] = useState(0);
+  const meId = (user && (user.id || user.uname)) || '';
+  useEffect(() => {
+    if (!meId) return undefined;
+    let dead = false;
+    const check = async () => {
+      try {
+        const j = await (await fetch(`${API_URL}/api/notifications?home_id=${encodeURIComponent(meId)}`)).json();
+        if (!dead && j && j.success) setUnread(j.data.length);
+      } catch { /* offline: try again later */ }
+    };
+    check();
+    const t = setInterval(check, 60000);
+    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { dead = true; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, [meId]);
+  const goToNotifications = () => {
+    setOpen(false);
+    if (onNotifications) return onNotifications();
+    window.location.href = '/notifications';
+  };
 
   // FIXED NAVIGATION - always works even if props missing
   const goToDeck = () => {
@@ -112,6 +138,11 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
         </div>
 
         <div style={{display:'flex', alignItems:'center', gap:'8px', flexShrink:0}}>
+          <button onClick={goToNotifications} title={unread ? `${unread} waiting` : 'Notifications'} aria-label={unread ? `Notifications, ${unread} waiting` : 'Notifications'}
+            style={{position:'relative', width:'32px', height:'32px', background: page==='notifications' ? '#1a1a1a' : '#f8f5f0', border:'1px solid #e9e2d6', borderRadius:'8px', cursor:'pointer', fontSize:'15px', padding:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
+            🔔
+            {unread > 0 && <span style={{position:'absolute', top:'-6px', right:'-6px', minWidth:'16px', height:'16px', padding:'0 4px', boxSizing:'border-box', borderRadius:'8px', background:'#d33', color:'white', fontSize:'10px', fontWeight:700, lineHeight:'16px', textAlign:'center'}}>{unread > 99 ? '99+' : unread}</span>}
+          </button>
           <div title={user?.name || ''} style={{width:'32px', height:'32px', background:'#f8f5f0', border:'1px solid #e9e2d6', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:'12px', overflow:'hidden'}}>
             {savedPhoto && photoOk ? <img src={savedPhoto} alt="" onError={()=>setPhotoOk(false)} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : initial}
           </div>

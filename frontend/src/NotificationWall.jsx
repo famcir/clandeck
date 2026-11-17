@@ -67,7 +67,7 @@ export default function NotificationWall({ onGoDeck, onGoProfile, onLogout }) {
   return (
     <div style={{ minHeight: '100vh', background: '#f7f4ef', width: '100%', maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box' }}>
       <style>{`.nw-font :not(header):not(header *) { font-family: Arial, Helvetica, sans-serif; }`}</style>
-      <CommonHeader self={storedUser} page="notifications" onDeck={onGoDeck} onProfile={onGoProfile} onLogout={onLogout} />
+      <CommonHeader self={storedUser} page="notifications" onDeck={onGoDeck} onProfile={onGoProfile} onNotifications={() => {}} onLogout={onLogout} />
       <div className="nw-font" style={{ maxWidth: 760, margin: '0 auto', padding: '16px 20px 40px', boxSizing: 'border-box', width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, flex: 1, minWidth: 160 }}>🔔 Notification wall{waiting > 0 && <span style={{ marginLeft: 8, background: '#b3261e', color: '#fff', borderRadius: 10, padding: '1px 8px', fontSize: 11 }}>{waiting} waiting</span>}</h2>
