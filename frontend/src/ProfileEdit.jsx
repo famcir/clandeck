@@ -464,7 +464,7 @@ export default function ProfileEdit({ onGoProfile, onLogout, onGoDeck }) {
       const res = await fetchJSON('/api/profiles/family-add', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          owner_profile_id: focus.id, display_name: picked ? picked.display_name : addName.trim(), gender: addGender,
+          owner_profile_id: focus.id, home_id: me && me.id, display_name: picked ? picked.display_name : addName.trim(), gender: addGender,
           existing_profile_id: picked ? picked.id : null,
           relation_type: showAdd.type, spouse_id: showAdd.type === 'Child' ? addSpouse : null
         })

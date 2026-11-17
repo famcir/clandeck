@@ -382,6 +382,21 @@ const groupsReady = (async () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (group_id, profile_id)
     )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS profile_notifications (
+      id VARCHAR(36) NOT NULL PRIMARY KEY,
+      to_profile_id VARCHAR(36) NOT NULL,
+      from_profile_id VARCHAR(36) NULL,
+      kind VARCHAR(20) NOT NULL,
+      group_id VARCHAR(36) NULL,
+      relation_type VARCHAR(20) NULL,
+      message TEXT NULL,
+      status VARCHAR(10) NOT NULL DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      responded_at DATETIME NULL
+    )`);
+    try { await pool.query(`CREATE INDEX idx_pn_to ON profile_notifications (to_profile_id)`); } catch { /* already there */ }
+    // a member who has their own account must accept before they count as being in the group
+    try { await pool.query(`ALTER TABLE profile_group_members ADD COLUMN status VARCHAR(10) NOT NULL DEFAULT 'accepted'`); } catch { /* already there */ }
     // columns this feature needs (a failure here just means the column is already there)
     for (const col of [
       `owner_profile_id VARCHAR(36) NULL`,
@@ -401,6 +416,18 @@ const groupHome = async (ref) => {
   return r[0] || null;
 };
 const cleanPhoto = (p) => { const u = p.photo_compressed_url || p.photo_url || ''; return u.startsWith('blob:') || u.startsWith('data:') ? '' : u; };
+// one pending request per (person, group / relation); asks the person to accept or reject
+const notifyPerson = async (to, from, kind, extra = {}) => {
+  await groupsReady;
+  if (kind !== 'info') {
+    const [dup] = await pool.query(`SELECT id FROM profile_notifications WHERE to_profile_id = ? AND from_profile_id = ? AND kind = ? AND status = 'pending' AND COALESCE(group_id,'') = ? AND COALESCE(relation_type,'') = ? LIMIT 1`,
+      [to, from, kind, extra.group_id || '', extra.relation_type || '']);
+    if (dup.length) return;
+  }
+  await pool.query(`INSERT INTO profile_notifications (id, to_profile_id, from_profile_id, kind, group_id, relation_type, message, status) VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?)`,
+    [to, from, kind, extra.group_id || null, extra.relation_type || null, extra.message || null, kind === 'info' ? 'info' : 'pending']);
+};
+
 const groupMemberOut = (p) => ({ id: p.id, display_name: p.display_name, nickname: p.nickname || '', gender: p.gender || '', photo_url: cleanPhoto(p), is_claimed: p.is_claimed ? 1 : 0, owner_user_id: p.owner_user_id });
 
 const loadGroups = async (home) => {
@@ -415,14 +442,14 @@ const loadGroups = async (home) => {
   const ids = gs.map((g) => g.id);
   const byGroup = new Map(ids.map((i) => [i, []]));
   if (ids.length) {
-    const [ms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE group_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at, id`, ids);
+    const [ms] = await pool.query(`SELECT group_id, profile_id, status FROM profile_group_members WHERE group_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at, id`, ids);
     const pids = [...new Set(ms.map((m) => m.profile_id))];
     const pmap = new Map();
     if (pids.length) {
       const [ps] = await pool.query(`SELECT id, display_name, nickname, gender, photo_compressed_url, photo_url, is_claimed, owner_user_id FROM profiles WHERE id IN (${pids.map(() => '?').join(',')})`, pids);
       ps.forEach((p) => pmap.set(p.id, p));
     }
-    ms.forEach((m) => { const p = pmap.get(m.profile_id); if (p) byGroup.get(m.group_id).push(groupMemberOut(p)); });
+    ms.forEach((m) => { const p = pmap.get(m.profile_id); if (p) byGroup.get(m.group_id).push({ ...groupMemberOut(p), status: m.status === 'pending' ? 'pending' : 'accepted' }); });
   }
   return gs.map((g) => ({ id: g.id, name: g.name, kind: g.kind, is_default: g.is_default ? 1 : 0, visibility: g.visibility === 'family' ? 'family' : 'private', members: byGroup.get(g.id) }));
 };
@@ -515,7 +542,7 @@ app.post('/api/groups/:id/members', async (req, res) => {
     const [cnt] = await pool.query(`SELECT COUNT(*) AS n FROM profile_group_members WHERE group_id = ?`, [g[0].id]);
     if (Number(cnt[0].n) >= 500) return res.status(400).json({ success: false, error: 'A group can have up to 500 members' });
 
-    let pid;
+    let pid, needsOk = false;
     if (b.profile_id) {
       const [pr] = await pool.query(`SELECT id, owner_user_id, is_claimed, visibility FROM profiles WHERE id = ? LIMIT 1`, [b.profile_id]);
       const P = pr[0];
@@ -525,6 +552,7 @@ app.post('/api/groups/:id/members', async (req, res) => {
       const open = P.is_claimed && String(P.visibility || 'public').toLowerCase() !== 'private';
       if (!mine && !open) return res.status(403).json({ success: false, error: 'That profile is private' });
       pid = P.id;
+      needsOk = !!P.is_claimed;   // a person with their own account must accept
     } else {
       const name = String(b.display_name || '').trim().replace(/\s+/g, ' ');
       if (!name) return res.status(400).json({ success: false, error: 'Please type a name' });
@@ -539,7 +567,8 @@ app.post('/api/groups/:id/members', async (req, res) => {
     }
     const [dup] = await pool.query(`SELECT id FROM profile_group_members WHERE group_id = ? AND profile_id = ? LIMIT 1`, [g[0].id, pid]);
     if (dup.length) return res.status(409).json({ success: false, error: 'Already in this group' });
-    await pool.query(`INSERT INTO profile_group_members (id, group_id, profile_id, added_by) VALUES (UUID(), ?, ?, ?)`, [g[0].id, pid, home.id]);
+    await pool.query(`INSERT INTO profile_group_members (id, group_id, profile_id, added_by, status) VALUES (UUID(), ?, ?, ?, ?)`, [g[0].id, pid, home.id, needsOk ? 'pending' : 'accepted']);
+    if (needsOk) await notifyPerson(pid, home.id, 'group_add', { group_id: g[0].id });
     res.json({ success: true, added: pid, data: await loadGroups(home) });
   } catch (e) { console.error('group add member error:', e); res.status(500).json({ success: false, error: e.message }); }
 });
@@ -554,6 +583,7 @@ app.post('/api/groups/:id/members/remove', async (req, res) => {
     const [g] = await pool.query(`SELECT id FROM profile_groups WHERE id = ? AND owner_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
     if (!g.length) return res.status(404).json({ success: false, error: 'Group not found' });
     await pool.query(`DELETE FROM profile_group_members WHERE group_id = ? AND profile_id = ?`, [g[0].id, b.profile_id]);
+    await pool.query(`DELETE FROM profile_notifications WHERE kind = 'group_add' AND status = 'pending' AND group_id = ? AND to_profile_id = ?`, [g[0].id, b.profile_id]);
     await dropOrphan(b.profile_id, home);
     res.json({ success: true, data: await loadGroups(home) });
   } catch (e) { console.error('group remove member error:', e); res.status(500).json({ success: false, error: e.message }); }
@@ -615,7 +645,7 @@ app.get('/api/search', async (req, res) => {
     const [named] = await pool.query(`SELECT id, is_claimed, visibility, owner_user_id FROM profiles WHERE (display_name LIKE ? OR nickname LIKE ?) AND id <> ? LIMIT 200`, [like, like, home.id]);
     const namedMap = new Map(named.map((p) => [p.id, p]));
     if (named.length) {
-      const [ms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE profile_id IN (${ph(named)})`, named.map((p) => p.id));
+      const [ms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE COALESCE(status,'accepted') <> 'pending' AND profile_id IN (${ph(named)})`, named.map((p) => p.id));
       const gids = [...new Set(ms.map((m) => m.group_id))];
       if (gids.length) {
         const [gs] = await pool.query(`SELECT id, name, owner_profile_id, visibility FROM profile_groups WHERE id IN (${ph(gids)})`, gids);
@@ -655,6 +685,84 @@ app.get('/api/search', async (req, res) => {
     }));
     res.json({ success: true, data });
   } catch (e) { console.error('search error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------------------------
+// NOTIFICATIONS: "Sarath added you to the group Cousins / as his Sibling"  ->  Accept or Reject
+// ---------------------------------------------------------------------------------------------
+app.get('/api/notifications', async (req, res) => {
+  try {
+    await groupsReady;
+    const home = await groupHome(String(req.query.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [ns] = await pool.query(`SELECT * FROM profile_notifications WHERE to_profile_id = ? AND status IN ('pending','info') ORDER BY created_at DESC LIMIT 50`, [home.id]);
+    const pids = [...new Set(ns.map((n) => n.from_profile_id).filter(Boolean))];
+    const pmap = new Map();
+    if (pids.length) { const [ps] = await pool.query(`SELECT id, display_name, nickname, gender, photo_compressed_url, photo_url, is_claimed, owner_user_id FROM profiles WHERE id IN (${pids.map(() => '?').join(',')})`, pids); ps.forEach((p) => pmap.set(p.id, groupMemberOut(p))); }
+    const gids = [...new Set(ns.map((n) => n.group_id).filter(Boolean))];
+    const gmap = new Map();
+    if (gids.length) { const [gs] = await pool.query(`SELECT id, name FROM profile_groups WHERE id IN (${gids.map(() => '?').join(',')})`, gids); gs.forEach((g) => gmap.set(g.id, g.name)); }
+    res.json({ success: true, data: ns.filter((n) => n.kind !== 'group_add' || gmap.has(n.group_id)).map((n) => ({ id: n.id, kind: n.kind, status: n.status, from: pmap.get(n.from_profile_id) || null, group_name: gmap.get(n.group_id) || null, relation_type: n.relation_type, message: n.message, created_at: n.created_at })) });
+  } catch (e) { console.error('notifications error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// body: home_id, action = 'accept' | 'reject' | 'dismiss'
+app.post('/api/notifications/:id/respond', async (req, res) => {
+  try {
+    await groupsReady;
+    const b = req.body || {};
+    const home = await groupHome(String(b.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [nr] = await pool.query(`SELECT * FROM profile_notifications WHERE id = ? AND to_profile_id = ? LIMIT 1`, [req.params.id, home.id]);
+    const n = nr[0];
+    if (!n) return res.status(404).json({ success: false, error: 'Notification not found' });
+    const action = String(b.action || '');
+    if (n.kind === 'info') {
+      if (action !== 'dismiss') return res.status(400).json({ success: false, error: 'Nothing to accept here' });
+      await pool.query(`DELETE FROM profile_notifications WHERE id = ?`, [n.id]);
+      return res.json({ success: true });
+    }
+    if (n.status !== 'pending') return res.status(409).json({ success: false, error: 'Already answered' });
+    if (action !== 'accept' && action !== 'reject') return res.status(400).json({ success: false, error: 'action must be accept or reject' });
+    const accept = action === 'accept';
+    let about = '';
+    if (n.kind === 'group_add') {
+      const [g] = await pool.query(`SELECT name FROM profile_groups WHERE id = ? LIMIT 1`, [n.group_id]);
+      about = g[0] ? `the group "${g[0].name}"` : 'a group';
+      if (accept) await pool.query(`UPDATE profile_group_members SET status = 'accepted' WHERE group_id = ? AND profile_id = ?`, [n.group_id, home.id]);
+      else await pool.query(`DELETE FROM profile_group_members WHERE group_id = ? AND profile_id = ?`, [n.group_id, home.id]);
+    } else if (n.kind === 'family_add') {
+      about = `as their ${n.relation_type || 'relative'}`;
+    }
+    await pool.query(`UPDATE profile_notifications SET status = ?, responded_at = NOW() WHERE id = ?`, [accept ? 'accepted' : 'rejected', n.id]);
+    // tell the person who added them
+    if (n.from_profile_id) {
+      const hint = !accept && n.kind === 'family_add' ? ' You can remove the link from Profile Edit (Remove link).' : '';
+      await notifyPerson(n.from_profile_id, home.id, 'info', { message: `${home.display_name} ${accept ? 'accepted' : 'declined'} being added ${n.kind === 'group_add' ? 'to ' : ''}${about}.${hint}` });
+    }
+    res.json({ success: true, accepted: accept });
+  } catch (e) { console.error('notification respond error:', e); res.status(500).json({ success: false, error: e.message }); }
+});
+
+// groups made by other people that I accepted: shown in my own profile (their members are visible to me)
+app.get('/api/groups/joined', async (req, res) => {
+  try {
+    await groupsReady;
+    const home = await groupHome(String(req.query.home_id || ''));
+    if (!home) return res.status(404).json({ success: false, error: 'Profile not found' });
+    const [gs] = await pool.query(`SELECT g.* FROM profile_groups g JOIN profile_group_members m ON m.group_id = g.id WHERE m.profile_id = ? AND COALESCE(m.status,'accepted') <> 'pending' AND g.owner_profile_id <> ? ORDER BY g.name`, [home.id, home.id]);
+    const out = [];
+    for (const g of gs) {
+      const [ms] = await pool.query(`SELECT profile_id FROM profile_group_members WHERE group_id = ? AND COALESCE(status,'accepted') <> 'pending' ORDER BY created_at, id`, [g.id]);
+      const ids = [...new Set([g.owner_profile_id, ...ms.map((m) => m.profile_id)])].filter((i) => i && i !== home.id);
+      const pmap = new Map();
+      if (ids.length) { const [ps] = await pool.query(`SELECT id, display_name, nickname, gender, photo_compressed_url, photo_url, is_claimed, owner_user_id, visibility FROM profiles WHERE id IN (${ids.map(() => '?').join(',')})`, ids); ps.forEach((p) => pmap.set(p.id, p)); }
+      const vis = (p) => !(p.is_claimed && String(p.visibility || 'public').toLowerCase() === 'private');
+      out.push({ id: g.id, name: g.name, kind: g.kind, owner: pmap.get(g.owner_profile_id) ? groupMemberOut(pmap.get(g.owner_profile_id)) : null,
+        members: ms.map((m) => pmap.get(m.profile_id)).filter((p) => p && p.id !== g.owner_profile_id && vis(p)).map(groupMemberOut) });
+    }
+    res.json({ success: true, data: out });
+  } catch (e) { console.error('joined groups error:', e); res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1093,6 +1201,13 @@ app.post('/api/profiles/family-add', async (req, res) => {
     await reconcileFamily(conn, [ownerId, newId]);
 
     await conn.commit();
+    if (existing && existing.is_claimed) {
+      try {
+        const actor = req.body.home_id ? await groupHome(String(req.body.home_id)) : null;
+        const fromId = (actor && actor.id) || ownerId;
+        if (fromId !== existing.id) await notifyPerson(existing.id, fromId, 'family_add', { relation_type, message: ownerId !== fromId ? owner.display_name : null });
+      } catch (e) { console.error('family notify:', e.message); }
+    }
     const [newProfileRows] = await pool.query(`SELECT * FROM profiles WHERE id = ?`, [newId]);
     res.json({ success: true, data: newProfileRows[0] });
   } catch (e) {

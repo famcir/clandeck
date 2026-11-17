@@ -708,6 +708,7 @@ function GroupsCard({ groups, homeId, ownerId, onChange, onOpen, onInvite }) {
                       style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: 8, fontFamily: 'inherit' }}>
                       <Avatar p={m} size={28} />
                       <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.display_name}</span>
+                      {m.status === 'pending' && <span title="Waiting for them to accept" style={{ fontSize: 9, color: '#8a5a10', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: 10, padding: '1px 6px', flexShrink: 0 }}>⏳ waiting</span>}
                     </button>
                     {!m.is_claimed && ownerId && m.owner_user_id === ownerId && (
                       <button type="button" onClick={() => onInvite(m)} title={`Invite ${m.display_name} (temporary login by WhatsApp / SMS)`} aria-label={`Invite ${m.display_name}`}
@@ -791,6 +792,68 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
   );
 }
 
+// ================= REQUESTS: "X added you ... Accept / Reject" =================
+function NoticeBar({ notes, busyId, onAnswer, onOpen }) {
+  if (!notes.length) return null;
+  const text = (n) => {
+    const who = n.from ? n.from.display_name : 'Someone';
+    if (n.kind === 'group_add') return <><b>{who}</b> added you to the group <b>{n.group_name}</b></>;
+    if (n.kind === 'family_add') return <><b>{who}</b> added you as {n.message ? <>{n.message}'s </> : 'their '}<b>{n.relation_type || 'relative'}</b></>;
+    return <>{n.message}</>;
+  };
+  const btn = (bg, fg) => ({ padding: '7px 14px', borderRadius: 20, border: bg === '#fff' ? '1px solid #d8c5a3' : 'none', background: bg, color: fg, fontWeight: 600, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' });
+  return (
+    <div style={{ margin: '12px 20px 0', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+      {notes.map((n) => (
+        <div key={n.id} style={{ padding: '10px 14px', background: n.kind === 'info' ? '#f3f7f1' : '#fff8e1', border: `1px solid ${n.kind === 'info' ? '#cfe3c8' : '#f1dc9a'}`, borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13, minWidth: 0 }}>
+          <span style={{ fontSize: 16 }}>{n.kind === 'info' ? 'ℹ️' : '🔔'}</span>
+          <span style={{ flex: 1, minWidth: 180, wordBreak: 'break-word' }}>{text(n)}</span>
+          {n.from && n.kind !== 'info' && <button type="button" onClick={() => onOpen(n.from)} style={btn('#fff', '#1a1a1a')}>View profile</button>}
+          {n.kind === 'info'
+            ? <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'dismiss')} style={btn('#111', '#fff')}>OK</button>
+            : <>
+                <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'accept')} style={btn('#111', '#fff')}>Accept</button>
+                <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'reject')} style={btn('#fff', '#b3261e')}>Reject</button>
+              </>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// groups other people made and I accepted: they show up in my own profile
+function JoinedGroups({ groups, onOpen }) {
+  const [open, setOpen] = useState({});
+  if (!groups.length) return null;
+  return (
+    <div className="card" style={{ marginTop: 16, padding: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Groups I'm in ({groups.length})</div>
+      {groups.map((g) => (
+        <div key={g.id} style={{ border: '1px solid #f0e0c0', borderRadius: 10, marginBottom: 8, background: '#fff', overflow: 'hidden' }}>
+          <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.id]: !o[g.id] }))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</span>
+              {g.owner && <span style={{ display: 'block', fontSize: 10, color: '#8a7a65' }}>by {g.owner.display_name}</span>}
+            </span>
+            <span style={{ fontSize: 11, color: '#8a7a65' }}>{g.members.length + (g.owner ? 1 : 0)} {open[g.id] ? '▲' : '▼'}</span>
+          </button>
+          {open[g.id] && (
+            <div style={{ padding: '2px 8px 8px' }}>
+              {[g.owner, ...g.members].filter(Boolean).map((m, i) => (
+                <button key={m.id} type="button" onClick={() => onOpen(m, g.name)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: 8, fontFamily: 'inherit' }}>
+                  <Avatar p={m} size={26} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.display_name}</span>
+                  {i === 0 && <span style={{ fontSize: 9, color: '#8a7a65' }}>owner</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ================= AD SLOTS =================
 // Shows a labelled empty box until real ads are switched on. To go live, put these in the frontend .env.production
 // (Google AdSense) and rebuild:  VITE_ADSENSE_CLIENT=ca-pub-XXXXXXXXXXXXXXXX
@@ -854,6 +917,9 @@ export default function Deck({ onGoProfile, onLogout }) {
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
   const [groupInvite, setGroupInvite] = useState(null);    // invite pop-up for a friend from My Groups
+  const [notes, setNotes] = useState([]);                 // requests waiting for my Accept / Reject
+  const [noteBusy, setNoteBusy] = useState('');
+  const [joined, setJoined] = useState([]);               // groups made by others that I accepted
   const [viewing, setViewing] = useState(null);           // a member opened from search: view-only profile
   const [viewInfo, setViewInfo] = useState(null);         // that member's full public details
   useEffect(() => {
@@ -884,6 +950,30 @@ export default function Deck({ onGoProfile, onLogout }) {
     } catch { /* groups stay empty; the rest of the page still works */ }
   }, []); // eslint-disable-line
   useEffect(() => { loadGroups(); }, [loadGroups]);
+
+  const loadNotes = useCallback(async () => {
+    const home = encodeURIComponent(storedUser.id || storedUser.uname || '');
+    try {
+      const [a, b] = await Promise.all([fetch(`${API_URL}/api/notifications?home_id=${home}`).then((r) => r.json()), fetch(`${API_URL}/api/groups/joined?home_id=${home}`).then((r) => r.json())]);
+      if (a.success) setNotes(a.data);
+      if (b.success) setJoined(b.data);
+    } catch { /* offline: try again on the next tick */ }
+  }, []); // eslint-disable-line
+  useEffect(() => {
+    loadNotes();
+    const t = setInterval(loadNotes, 60000);
+    const onVis = () => { if (document.visibilityState === 'visible') loadNotes(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, [loadNotes]);
+  const answerNote = async (n, action) => {
+    setNoteBusy(n.id);
+    try {
+      await fetch(`${API_URL}/api/notifications/${n.id}/respond`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ home_id: storedUser.id || storedUser.uname, action }) });
+    } catch { /* the list below is refreshed either way */ }
+    setNoteBusy('');
+    await loadNotes();
+  };
 
   useEffect(() => {
     const safeParse = (key) => {
@@ -1000,6 +1090,8 @@ export default function Deck({ onGoProfile, onLogout }) {
         </div>
       )}
 
+      {!viewing && <NoticeBar notes={notes} busyId={noteBusy} onAnswer={answerNote} onOpen={(p) => { setViewing({ ...p, way: '' }); window.scrollTo({ top: 0 }); }} />}
+
       {!viewing && tempLogin && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
           <span style={{flex:1, minWidth:200}}>🔑 You are using a <b>temporary login</b>. Please set your own username and password in Profile Edit.</span>
@@ -1094,6 +1186,7 @@ export default function Deck({ onGoProfile, onLogout }) {
 
         <div>
           {!viewing && <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} ownerId={storedUser?.id} onInvite={(m) => setGroupInvite({ person: m, mobile: '', result: null })} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />}
+          {!viewing && <JoinedGroups groups={joined} onOpen={(m) => { setViewing({ ...m, way: '' }); window.scrollTo({ top: 0 }); }} />}
           <div style={{marginTop: viewing ? 0 : '16px'}}><AdSlot kind="square" /></div>
         </div>
       </div>
