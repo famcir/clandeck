@@ -802,6 +802,7 @@ function NoticeBar({ notes, busyId, onAnswer, onOpen }) {
   if (!notes.length) return null;
   const text = (n) => {
     const who = n.from ? n.from.display_name : 'Someone';
+    if (n.kind === 'chat_request') return <><b>{who}</b> wants to chat with you</>;
     if (n.kind === 'group_add') return <><b>{who}</b> added you to the group <b>{n.group_name}</b></>;
     if (n.kind === 'family_add') return <><b>{who}</b> added you as {n.message ? <>{n.message}'s </> : 'their '}<b>{n.relation_type || 'relative'}</b></>;
     return <>{n.message}</>;
@@ -921,6 +922,15 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
   const [groups, setGroups] = useState([]);
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);          // unread chat messages (badge on the 💬 button)
+  useEffect(() => {
+    const token = (() => { try { return localStorage.getItem('token') || ''; } catch { return ''; } })();
+    if (!token) return undefined;
+    const check = () => fetch(`${API_URL}/api/chat/unread`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).then((j) => { if (j && j.success) setChatUnread(j.total); }).catch(() => {});
+    check();
+    const t = setInterval(check, 45000);
+    return () => clearInterval(t);
+  }, []);
   const [groupInvite, setGroupInvite] = useState(null);    // invite pop-up for a friend from My Groups
   const [notes, setNotes] = useState([]);                 // requests waiting for my Accept / Reject
   const [noteBusy, setNoteBusy] = useState('');
@@ -1204,8 +1214,11 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         </div>
       </div>
 
-      <button onClick={()=>setShowChat(true)} style={{position:'fixed', bottom:'18px', right:'18px', width:'50px', height:'50px', background:'black', color:'white', borderRadius:'50%', border:'none', cursor:'pointer', zIndex:9999}}>💬</button>
-      {showChat && <ChatSystem self={storedUser} allProfiles={family} groups={groups} onClose={()=>setShowChat(false)} />}
+      <button onClick={()=>setShowChat(true)} aria-label={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'} style={{position:'fixed', bottom:'18px', right:'18px', width:'50px', height:'50px', background:'black', color:'white', borderRadius:'50%', border:'none', cursor:'pointer', zIndex:9999}}>
+        💬
+        {chatUnread > 0 && <span style={{position:'absolute', top:'-4px', right:'-4px', minWidth:'18px', height:'18px', padding:'0 5px', boxSizing:'border-box', borderRadius:'9px', background:'#d33', color:'white', fontSize:'10px', fontWeight:700, lineHeight:'18px', textAlign:'center'}}>{chatUnread > 99 ? '99+' : chatUnread}</span>}
+      </button>
+      {showChat && <ChatSystem self={storedUser} groups={groups} onUnread={setChatUnread} onClose={()=>setShowChat(false)} />}
     </div>
   );
 }

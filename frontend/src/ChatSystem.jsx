@@ -1,396 +1,359 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-export default function ChatSystem({ self, allProfiles = [], groups = [], groupMembers = [], onClose }) {
-  const currentUserId = localStorage.getItem('userId') || 'ur001';
-  const chatUserId = self?.id || currentUserId;
-  const [activeChat, setActiveChat] = useState(null);
+const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
+
+// ---- small helpers -------------------------------------------------------------------------------------------
+const parseTime = (d) => {
+  if (!d) return null;
+  const raw = String(d);
+  const t = new Date(raw.includes('T') || raw.endsWith('Z') ? raw : raw.replace(' ', 'T') + 'Z');   // the server stores UTC
+  return Number.isNaN(t.getTime()) ? null : t;
+};
+const clock = (d) => { const t = parseTime(d); return t ? t.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : ''; };
+const dayLabel = (d) => {
+  const t = parseTime(d); if (!t) return '';
+  const today = new Date(); const y = new Date(); y.setDate(today.getDate() - 1);
+  if (t.toDateString() === today.toDateString()) return 'Today';
+  if (t.toDateString() === y.toDateString()) return 'Yesterday';
+  return t.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+const shortWhen = (d) => {
+  const t = parseTime(d); if (!t) return '';
+  return t.toDateString() === new Date().toDateString() ? clock(d) : t.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+};
+
+function Avatar({ p, name, size = 38, group = false, online = false }) {
+  const [bad, setBad] = useState(false);
+  const url = p && p.photo_url && !bad ? p.photo_url : '';
+  const label = (name || (p && p.display_name) || '?').trim().charAt(0).toUpperCase();
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <div style={{ width: size, height: size, borderRadius: group ? 10 : 9, overflow: 'hidden', background: group ? '#1a1a1a' : '#c9ad83', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: size * 0.4 }}>
+        {url ? <img src={url} alt="" onError={() => setBad(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : label}
+      </div>
+      {online && <span title="Online" style={{ position: 'absolute', top: -3, right: -3, width: 11, height: 11, background: '#2fb344', border: '2px solid white', borderRadius: '50%' }} />}
+    </div>
+  );
+}
+
+export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
+  const token = (() => { try { return localStorage.getItem('token') || ''; } catch { return ''; } })();
+  const meKey = self?.id || self?.uname || '';
+
+  const [view, setView] = useState('list');            // 'list' | 'new' | 'thread'
+  const [convs, setConvs] = useState([]);
+  const [people, setPeople] = useState([]);            // family + group-mates I can chat with now
+  const [joined, setJoined] = useState([]);            // groups made by others that I accepted
+  const [active, setActive] = useState(null);          // open conversation summary
   const [messages, setMessages] = useState([]);
-  const [newMsg, setNewMsg] = useState('');
-  const [recording, setRecording] = useState(false);
-  const [inCall, setInCall] = useState(null);
-  const [onlineIds, setOnlineIds] = useState(new Set());
-  const [groupCounts, setGroupCounts] = useState({});
-  const [myFamily, setMyFamily] = useState([]);
-  const [myGroups, setMyGroups] = useState([]);
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [currentCallId, setCurrentCallId] = useState(null);
-  const [callStatus, setCallStatus] = useState('');
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const fileInputRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const peerRef = useRef(null);
-  const ringingAudioRef = useRef(null);
+  const [who, setWho] = useState({});                  // profile id -> person (for names in groups)
+  const [hasMore, setHasMore] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [needLogin, setNeedLogin] = useState(!token);
+  const [online, setOnline] = useState(new Set());
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState([]);              // search results from anyone on ClanDeck
+  const [meId, setMeId] = useState('');                // my PROFILE id (the chat identity)
+  const endRef = useRef(null);
+  const activeRef = useRef(null);
+  const listRef = useRef(null);
+  useEffect(() => { activeRef.current = active; }, [active]);
 
-  useEffect(() => {
-    if(!self?.id) return;
-    fetch(`/api/profiles?owner_user_id=${currentUserId}`).then(r=>r.json()).then(data=>{
-      if(Array.isArray(data) && data.length>0) setMyFamily(data);
-    }).catch(()=>{});
-  }, [self?.id, currentUserId]);
-
-  useEffect(() => {
-    fetch(`/api/profile-groups?owner_user_id=${currentUserId}`).then(r=>r.json()).then(data=>{
-      if(Array.isArray(data) && data.length>0) setMyGroups(data);
-      else setMyGroups(groups);
-    }).catch(()=> setMyGroups(groups));
-  }, [currentUserId]);
-
-  useEffect(() => {
-    const list = myGroups.length>0? myGroups : groups;
-    if(!list.length) return;
-    list.forEach(async (g)=>{
-      try{
-        const data = await fetch(`/api/group-members?group_id=${g.id}`).then(r=>r.json()).catch(()=>[]);
-        if(Array.isArray(data)){
-          setGroupCounts(prev=>({...prev, [g.id]: { total: data.length, members: data }}));
-        }
-      }catch{}
+  const api = useCallback(async (path, opts = {}) => {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
     });
-  }, [myGroups, groups]);
+    let j = {};
+    try { j = await res.json(); } catch { /* not json */ }
+    if (res.status === 401) { setNeedLogin(true); throw new Error('Please log out and log in again'); }
+    if (!res.ok || j.success === false) throw new Error(j.error || 'Something went wrong');
+    return j;
+  }, [token]);
 
-  const baseProfiles = myFamily.length>0? myFamily : allProfiles;
-  const baseGroups = myGroups.length>0? myGroups : groups;
-
-  const spouses = baseProfiles.filter(p => p.computed_relation === 'Spouse' || p.relation_label === 'Spouse');
-  const father = baseProfiles.find(p => p.computed_relation === 'Father' || p.id === self?.father_id);
-  const mother = baseProfiles.find(p => p.computed_relation === 'Mother' || p.id === self?.mother_id);
-  const siblings = baseProfiles.filter(p => p.computed_relation === 'Sibling');
-  const children = baseProfiles.filter(p => p.computed_relation === 'Child');
-  const rawFamily = [...spouses, father, mother,...siblings,...children].filter(Boolean);
-  const immediateFamily = Array.from(new Map(rawFamily.map(p=>[p.id,p])).values());
+  // ---- loading -----------------------------------------------------------------------------------------------
+  const loadConvs = useCallback(async () => {
+    try {
+      const j = await api('/api/chat/conversations');
+      setConvs(j.data); if (j.me) setMeId(j.me);
+      if (onUnread) onUnread(j.data.reduce((n, c) => n + (c.unread || 0), 0));
+    } catch { /* shown by needLogin when it matters */ }
+  }, [api, onUnread]);
 
   useEffect(() => {
-    if(!self?.id) return;
-    const fetchOnline = async () => {
+    if (needLogin) return;
+    loadConvs();
+    api('/api/chat/people').then((j) => setPeople(j.data)).catch(() => {});
+    if (meKey) fetch(`${API_URL}/api/groups/joined?home_id=${encodeURIComponent(meKey)}`).then((r) => r.json()).then((j) => { if (j.success) setJoined(j.data); }).catch(() => {});
+  }, [needLogin]); // eslint-disable-line
+
+  // who is online (checked every 20 seconds)
+  useEffect(() => {
+    if (needLogin) return undefined;
+    const ids = [...new Set([...people.map((p) => p.id), ...convs.map((c) => c.other && c.other.id)].filter(Boolean))];
+    if (!ids.length) return undefined;
+    const check = () => api(`/api/chat/online?ids=${encodeURIComponent(ids.join(','))}`).then((j) => setOnline(new Set(j.data))).catch(() => {});
+    check();
+    const t = setInterval(check, 20000);
+    return () => clearInterval(t);
+  }, [people, convs.length, needLogin]); // eslint-disable-line
+
+  // live messages
+  const openLoad = useCallback(async (conv) => {
+    try {
+      const j = await api(`/api/chat/messages?conversation_id=${encodeURIComponent(conv.id)}`);
+      setMessages(j.data); setWho((w) => ({ ...w, ...j.people })); setHasMore(!!j.has_more);
+      api('/api/chat/read', { method: 'POST', body: JSON.stringify({ conversation_id: conv.id }) }).then(loadConvs).catch(() => {});
+    } catch (e) { setNotice(e.message); }
+  }, [api, loadConvs]);
+
+  useEffect(() => {
+    if (needLogin || typeof EventSource === 'undefined') return undefined;
+    const es = new EventSource(`${API_URL}/api/chat/stream?token=${encodeURIComponent(token)}`);
+    es.addEventListener('message', (ev) => {
       try {
-        const data = await fetch('/api/chatbox/online').then(r=>r.json()).catch(()=>[]);
-        if(Array.isArray(data)) setOnlineIds(new Set(data));
-      } catch {}
-    };
-    const heartbeat = () => {
-      fetch('/api/chatbox/heartbeat', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({userId: self.id, displayName: self?.display_name || currentUserId})
-      }).catch(()=>{});
-    };
-    const goOffline = () => {
-      const data = JSON.stringify({userId: self.id});
-      try{ navigator.sendBeacon('/api/chatbox/offline', new Blob([data], {type:'application/json'})); }catch{}
-      fetch('/api/chatbox/offline', { method:'POST', headers:{'Content-Type':'application/json'}, body: data, keepalive:true }).catch(()=>{});
-    };
-    fetchOnline(); heartbeat();
-    const id1 = setInterval(fetchOnline, 3000);
-    const id2 = setInterval(heartbeat, 10000);
-    window.addEventListener('beforeunload', goOffline);
-    window.addEventListener('pagehide', goOffline);
-    return () => { clearInterval(id1); clearInterval(id2); window.removeEventListener('beforeunload', goOffline); window.removeEventListener('pagehide', goOffline); goOffline(); };
-  }, [self?.id]);
-
-  useEffect(() => {
-    if(!chatUserId) return;
-    const checkIncoming = async () => {
-      try{
-        const call = await fetch(`/api/call/incoming/${chatUserId}`).then(r=>r.json()).catch(()=>null);
-        if(call && call.id && call.caller_id!== chatUserId){
-          setIncomingCall(call);
-          setCurrentCallId(call.id);
-          if(ringingAudioRef.current){ ringingAudioRef.current.play().catch(()=>{}); }
+        const { conversation_id: cid, message } = JSON.parse(ev.data);
+        const cur = activeRef.current;
+        if (cur && cur.id === cid) {
+          setMessages((m) => (m.some((x) => x.id === message.id) ? m : [...m, message]));
+          api('/api/chat/read', { method: 'POST', body: JSON.stringify({ conversation_id: cid }) }).catch(() => {});
         }
-      }catch{}
-    };
-    checkIncoming();
-    const id = setInterval(checkIncoming, 3000);
-    return ()=> clearInterval(id);
-  }, [chatUserId]);
+        loadConvs();
+      } catch { /* ignore a broken event */ }
+    });
+    const safety = setInterval(loadConvs, 30000);     // in case the live link dropped quietly
+    return () => { es.close(); clearInterval(safety); };
+  }, [needLogin, token]); // eslint-disable-line
 
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: 'end' }); }, [messages.length, view]);
+
+  // search everyone on ClanDeck (they must accept a chat request first unless they are family / in a shared group)
   useEffect(() => {
-    if(!currentCallId || incomingCall) return;
-    const checkAccepted = async () => {
-      try{
-        const c = await fetch(`/api/call/${currentCallId}`).then(r=>r.json());
-        if(c?.status === 'accepted' && c.sdp_answer){
-          if(peerRef.current && peerRef.current.signalingState!== 'closed'){
-            try{
-              await peerRef.current.setRemoteDescription(new RTCSessionDescription(JSON.parse(c.sdp_answer)));
-              setCallStatus('connected');
-            }catch(e){ console.log('setRemote answer err', e); }
-          }
-        }
-        if(c?.status === 'rejected'){ endCall(); alert('Call rejected'); }
-        if(c?.status === 'ended'){ endCall(); }
-      }catch{}
-    };
-    const id = setInterval(checkAccepted, 2000);
-    return ()=> clearInterval(id);
-  }, [currentCallId, incomingCall]);
+    const term = q.trim();
+    if (view !== 'new' || term.length < 2 || !meKey) { setFound([]); return undefined; }
+    let dead = false;
+    const t = setTimeout(async () => {
+      try {
+        const j = await (await fetch(`${API_URL}/api/profiles/search?q=${encodeURIComponent(term)}&owner_profile_id=${encodeURIComponent(meKey)}&include_linked=1`)).json();
+        if (!dead && j.success) setFound(j.data.filter((p) => p.is_claimed));
+      } catch { if (!dead) setFound([]); }
+    }, 300);
+    return () => { dead = true; clearTimeout(t); };
+  }, [q, view, meKey]);
 
-  const isOnline = (id) => onlineIds.has(id);
-
-  // --- FIX #3 VIDEO CALL ---
-  const createPeer = () => {
-    const pc = new RTCPeerConnection({ iceServers: [{urls:'stun:stun.l.google.com:19302'}, {urls:'stun:stun1.l.google.com:19302'}] });
-    pc.onicecandidate = (e) => {
-      // We use non-trickle for now, offer/answer contains candidates after gathering
-      if(!e.candidate) console.log('ICE gathering complete');
-    };
-    pc.ontrack = (e) => {
-      console.log('REMOTE TRACK RECEIVED', e.streams[0]);
-      if(remoteVideoRef.current){
-        remoteVideoRef.current.srcObject = e.streams[0];
-        remoteVideoRef.current.play().catch(()=>{});
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      console.log('PC state', pc.connectionState);
-      if(pc.connectionState === 'connected') setCallStatus('connected');
-      if(pc.connectionState === 'failed' || pc.connectionState === 'disconnected') setCallStatus('reconnecting...');
-    };
-    return pc;
+  // ---- actions -----------------------------------------------------------------------------------------------
+  const openConv = async (conv) => {
+    setNotice(''); setActive(conv); setMessages([]); setView('thread'); setHasMore(false);
+    await openLoad(conv);
   };
-
-  const startCall = async (target) => {
-    try{
-      const targetId = target.id || target.profile_id;
-      const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480}, audio:true });
-      if(localVideoRef.current){ localVideoRef.current.srcObject = stream; localVideoRef.current.play().catch(()=>{}); }
-      const pc = createPeer();
-      stream.getTracks().forEach(t=> pc.addTrack(t, stream));
-      peerRef.current = pc;
-      const offer = await pc.createOffer({offerToReceiveAudio:true, offerToReceiveVideo:true});
-      await pc.setLocalDescription(offer);
-      // Wait a bit for ICE to gather (non-trickle)
-      await new Promise(r=>setTimeout(r, 800));
-      const finalOffer = pc.localDescription;
-      const res = await fetch('/api/call/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ caller_id: chatUserId, caller_name: self?.display_name || 'User', receiver_id: targetId, sdp_offer: JSON.stringify(finalOffer) }) }).then(r=>r.json());
-      setCurrentCallId(res.callId);
-      setInCall({type:'video', name: target.display_name || target.name});
-      setCallStatus('ringing... waiting to accept');
-    }catch(err){ alert('Camera permission needed: '+err.message); }
+  const startWith = async (person) => {
+    setNotice('');
+    try {
+      const j = await api('/api/chat/open', { method: 'POST', body: JSON.stringify({ profile_id: person.id }) });
+      if (j.needs_request) { setNotice(`Request sent to ${j.name || person.display_name}. You can chat as soon as they accept.`); return; }
+      await loadConvs(); setQ(''); openConv(j.conversation);
+    } catch (e) { setNotice(e.message); }
   };
-
-  const acceptCall = async () => {
-    if(!incomingCall) return;
-    try{
-      const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480}, audio:true });
-      if(localVideoRef.current){ localVideoRef.current.srcObject = stream; localVideoRef.current.play().catch(()=>{}); }
-      const pc = createPeer();
-      stream.getTracks().forEach(t=> pc.addTrack(t, stream));
-      peerRef.current = pc;
-      await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(incomingCall.sdp_offer)));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await new Promise(r=>setTimeout(r, 800));
-      const finalAnswer = pc.localDescription;
-      await fetch('/api/call/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: incomingCall.id, sdp_answer: JSON.stringify(finalAnswer) }) });
-      setInCall({type:'video', name: incomingCall.caller_name});
-      setCallStatus('connected');
-      setIncomingCall(null);
-      if(ringingAudioRef.current){ ringingAudioRef.current.pause(); ringingAudioRef.current.currentTime=0; }
-    }catch(err){ alert('Camera permission needed: '+err.message); }
+  const startGroup = async (g) => {
+    setNotice('');
+    try {
+      const j = await api('/api/chat/open', { method: 'POST', body: JSON.stringify({ group_id: g.id }) });
+      await loadConvs(); openConv(j.conversation);
+    } catch (e) { setNotice(e.message); }
   };
-
-  const rejectCall = async () => {
-    if(!incomingCall &&!currentCallId) return;
-    const id = incomingCall?.id || currentCallId;
-    await fetch('/api/call/reject', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: id }) });
-    setIncomingCall(null); setCurrentCallId(null);
-    if(ringingAudioRef.current){ ringingAudioRef.current.pause(); }
+  const older = async () => {
+    if (!messages.length) return;
+    try {
+      const j = await api(`/api/chat/messages?conversation_id=${encodeURIComponent(active.id)}&before=${messages[0].id}`);
+      const keep = listRef.current ? listRef.current.scrollHeight : 0;
+      setMessages((m) => [...j.data, ...m]); setWho((w) => ({ ...w, ...j.people })); setHasMore(!!j.has_more);
+      requestAnimationFrame(() => { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight - keep; });
+    } catch (e) { setNotice(e.message); }
   };
-
-  const endCall = async () => {
-    if(currentCallId){ await fetch('/api/call/end', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ callId: currentCallId }) }).catch(()=>{}); }
-    stopCamera();
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending || !active) return;
+    setSending(true); setNotice('');
+    try {
+      const j = await api('/api/chat/send', { method: 'POST', body: JSON.stringify({ conversation_id: active.id, body: text }) });
+      setDraft('');
+      setMessages((m) => (m.some((x) => x.id === j.message.id) ? m : [...m, j.message]));
+      loadConvs();
+    } catch (e) { setNotice(e.message); }
+    setSending(false);
   };
+  const back = () => { setActive(null); setView('list'); setNotice(''); loadConvs(); };
 
-  const stopCamera = () => {
-    if (localVideoRef.current?.srcObject) { localVideoRef.current.srcObject.getTracks().forEach(t => t.stop()); localVideoRef.current.srcObject = null; }
-    if (remoteVideoRef.current?.srcObject) { remoteVideoRef.current.srcObject.getTracks().forEach(t => t.stop()); remoteVideoRef.current.srcObject = null; }
-    if (mediaRecorderRef.current?.stream) { mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop()); }
-    peerRef.current?.close(); peerRef.current=null;
-    setInCall(null); setCurrentCallId(null); setCallStatus('');
-  };
-  const handleCloseAll = () => { stopCamera(); onClose(); };
-  const handleBack = () => { stopCamera(); setActiveChat(null); };
-  useEffect(() => { return () => { if (localVideoRef.current?.srcObject) localVideoRef.current.srcObject.getTracks().forEach(t => t.stop()); } }, []);
-  useEffect(() => {
-    if (!activeChat) return;
-    loadMessages();
-    const id = setInterval(loadMessages, 2000);
-    return () => clearInterval(id);
-  }, [activeChat]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  // ---- pieces ------------------------------------------------------------------------------------------------
+  const iAm = (m) => (meId ? m.sender_profile_id === meId : false);
+  const activeOnline = active && active.other && online.has(active.other.id);
+  const needle = q.trim().toLowerCase();
+  const shownPeople = people.filter((p) => !needle || p.display_name.toLowerCase().includes(needle));
+  const knownIds = new Set(people.map((p) => p.id));
+  const shownFound = found.filter((p) => !knownIds.has(p.id));
+  const allGroups = [...groups.map((g) => ({ id: g.id, name: g.name, note: 'My group' })), ...joined.map((g) => ({ id: g.id, name: g.name, note: `by ${g.owner ? g.owner.display_name : 'someone'}` }))]
+    .filter((g, i, a) => g.id && a.findIndex((x) => x.id === g.id) === i);
 
-  const loadMessages = async () => {
-    if (!activeChat) return;
-    const url = activeChat.type === 'group'? `/api/chat/group/${activeChat.id}` : `/api/chat/direct?user1=${chatUserId}&user2=${activeChat.id}`;
-    const data = await fetch(url).then(r => r.json()).catch(() => []);
-    setMessages(Array.isArray(data)? data : []);
-  };
-
-  const sendNotifyIfOffline = async (toId, textToSend) => {
-    if(isOnline(toId)) return;
-    await fetch('/api/chatbox/notify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to_user_id: toId, from_user_id: chatUserId, from_name: self?.display_name || 'Family member', title: `You have chat from ${self?.display_name}`, body: textToSend }) }).catch(()=>{});
-  };
-
-  const sendText = async () => {
-    if (!newMsg.trim() ||!activeChat) return;
-    const textToSend = newMsg;
-    const payload = { sender_id: chatUserId, sender_name: self?.display_name, text: textToSend, type: 'text', direct_to: activeChat.type === 'direct'? activeChat.id : null, group_id: activeChat.type === 'group'? activeChat.id : null };
-    setNewMsg(''); setMessages(prev => [...prev, payload]);
-    await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if(activeChat.type === 'direct'){ await sendNotifyIfOffline(activeChat.id, textToSend); }
-    else { activeChat.members?.forEach(m=>{ if(m.id!==chatUserId) sendNotifyIfOffline(m.id, textToSend); }); }
-  };
-
-  // --- FIX #2 CHAT UPLOAD - NO LONGER UPDATES PROFILE ---
-  const sendAttachment = async (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const fd = new FormData(); fd.append('file', file);
-    // FIX: Use chat upload endpoint, NOT /api/upload
-    const up = await fetch(`/api/chat/upload/document`, { method: 'POST', body: fd }).then(r => r.json()).catch(()=>({}));
-    if(!up.url){ alert('Upload failed'); return; }
-    const payload = { sender_id: chatUserId, sender_name: self?.display_name, text: up.url, type: file.type.startsWith('image/')? 'image' : 'file', fileName: file.name, direct_to: activeChat.type === 'direct'? activeChat.id : null, group_id: activeChat.type === 'group'? activeChat.id : null };
-    setMessages(prev => [...prev, payload]);
-    await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    e.target.value = '';
-  };
-
-  const startVoice = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorderRef.current = new MediaRecorder(stream); audioChunksRef.current = [];
-    mediaRecorderRef.current.ondataavailable = e => audioChunksRef.current.push(e.data);
-    mediaRecorderRef.current.onstop = async () => {
-      const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      const fd = new FormData(); fd.append('file', blob, 'voice.webm');
-      // FIX: Use voice upload endpoint, NOT /api/upload
-      const up = await fetch(`/api/chat/upload/voice`, { method: 'POST', body: fd }).then(r => r.json()).catch(()=>({}));
-      if(!up.url){ alert('Voice upload failed'); return; }
-      const payload = { sender_id: chatUserId, sender_name: self?.display_name, text: up.url, type: 'voice', direct_to: activeChat.type === 'direct'? activeChat.id : null, group_id: activeChat.type === 'group'? activeChat.id : null };
-      setMessages(prev => [...prev, payload]);
-      await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      stream.getTracks().forEach(t=>t.stop());
-    };
-    mediaRecorderRef.current.start(); setRecording(true);
-  };
-  const stopVoice = () => { mediaRecorderRef.current?.stop(); setRecording(false); };
-  useEffect(() => { if (inCall && localVideoRef.current &&!localVideoRef.current.srcObject) { navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => { localVideoRef.current.srcObject = s; localVideoRef.current.play().catch(()=>{}); }).catch(()=>{}); } }, [inCall]);
+  const head = { height: 54, background: '#efe8d3', borderBottom: '1px solid #e9e2d6', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', flexShrink: 0 };
+  const round = (dark) => ({ width: 30, height: 30, borderRadius: '50%', border: dark ? 'none' : '1px solid #d8c5a3', background: dark ? '#111' : '#fff', color: dark ? '#fff' : '#111', cursor: 'pointer', fontSize: 12, flexShrink: 0, fontFamily: 'inherit', padding: 0 });
+  const small = { fontSize: 10, color: '#8a7a65' };
 
   return (
-    <div className="fixed inset-0 md:inset-auto md:bottom-[86px] md:right-4 z-[9999] flex items-end justify-center md:justify-end bg-black/30 md:bg-transparent p-0 md:p-0" style={{fontFamily:'Plus Jakarta Sans'}}>
-      <div className="w-full md:w-[360px] h-[78vh] md:h-[520px] max-h-[85vh] bg-[#fffefb] border border-[#e9e2d6] rounded-t-[18px] md:rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden">
-        <div className="h-[52px] bg-[#efe8d3] border-b border-[#e9e2d6] flex items-center justify-between px-4 shrink-0">
-          {activeChat? (
+    <div className="cs-wrap">
+      <style>{`
+        .cs-wrap { position: fixed; z-index: 9999; right: 16px; bottom: 86px; font-family: inherit; }
+        .cs-box { width: 370px; height: 540px; max-height: calc(100vh - 110px); background: #fffefb; border: 1px solid #e9e2d6; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative; }
+        .cs-box button, .cs-box input, .cs-box textarea { font-family: inherit; }
+        .cs-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; width: 100%; border: none; background: none; text-align: left; cursor: pointer; box-sizing: border-box; }
+        .cs-row:hover { background: #f8f5f0; }
+        @media (max-width: 650px) {
+          .cs-wrap { inset: 0; right: 0; bottom: 0; background: rgba(0,0,0,.3); display: flex; align-items: flex-end; }
+          .cs-box { width: 100%; height: 92dvh; max-height: 92dvh; border-radius: 18px 18px 0 0; }
+        }
+      `}</style>
+      <div className="cs-box">
+        {/* ---------- header ---------- */}
+        <div style={head}>
+          {view === 'thread' && active ? (
             <>
-              <div className="flex items-center gap-2">
-                <button onClick={handleBack} className="w-7 h-7 bg-white border rounded-full flex items-center justify-center text-[12px]">←</button>
-                <div className="relative">
-                  {activeChat.photo? <img src={activeChat.photo} className="w-8 h-8 rounded-[6px] object-cover" /> : <div className="w-8 h-8 rounded-[6px] bg-black text-white flex items-center justify-center text-[11px] font-bold">{activeChat.name[0]}</div>}
-                  {activeChat.type==='direct' && isOnline(activeChat.id) && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
-                </div>
-                <div><p className="text-[12px] font-extrabold leading-none">{activeChat.name}</p><p className="text-[9px] text-gray-500">{activeChat.type === 'group'? `${activeChat.members?.length||groupCounts[activeChat.id]?.total||0} members` : isOnline(activeChat.id)? 'Online' : 'Offline'}</p></div>
+              <button type="button" onClick={back} style={round(false)} aria-label="Back to chats">←</button>
+              <Avatar p={active.other} name={active.title} size={34} group={active.kind === 'group'} online={!!activeOnline} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.title}</div>
+                <div style={small}>{active.kind === 'group' ? `${active.member_count} members` : activeOnline ? 'Online' : 'Offline'}</div>
               </div>
-              <div className="flex gap-1.5">
-                {activeChat.type==='direct' && <button onClick={() => startCall(activeChat)} className="w-8 h-8 bg-white border rounded-[6px]">📹</button>}
-                <button onClick={handleCloseAll} className="w-7 h-7 bg-black text-white rounded-full text-[10px]">✕</button>
-              </div>
+              <button type="button" disabled title="Voice and video calls are coming soon" style={{ ...round(false), opacity: 0.4, cursor: 'not-allowed' }}>📹</button>
+            </>
+          ) : view === 'new' ? (
+            <>
+              <button type="button" onClick={() => { setView('list'); setQ(''); setNotice(''); }} style={round(false)} aria-label="Back to chats">←</button>
+              <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>New chat</div>
             </>
           ) : (
             <>
-              <h3 className="font-extrabold text-[13px]">Chats</h3>
-              <button onClick={handleCloseAll} className="w-7 h-7 bg-black text-white rounded-full text-[10px]">✕</button>
+              <div style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>💬 Chats</div>
+              <button type="button" onClick={() => { setView('new'); setNotice(''); }} style={{ ...round(true), width: 'auto', padding: '0 14px', height: 30, borderRadius: 20, fontWeight: 600, fontSize: 11 }}>＋ New chat</button>
             </>
           )}
+          <button type="button" onClick={onClose} style={round(true)} aria-label="Close chat">✕</button>
         </div>
 
-        {incomingCall && (
-          <div className="absolute inset-0 bg-black/80 z-[100] flex flex-col items-center justify-center p-6 text-white">
-            <audio ref={ringingAudioRef} loop src="https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg" />
-            <div className="w-20 h-20 rounded-full bg-[#c9ad83] flex items-center justify-center text-2xl font-bold animate-pulse">{incomingCall.caller_name[0]}</div>
-            <p className="mt-4 font-bold text-[16px]">{incomingCall.caller_name} is calling...</p>
-            <p className="text-[12px] text-white/70 mt-1">Video call</p>
-            <div className="flex gap-6 mt-8">
-              <button onClick={rejectCall} className="w-14 h-14 bg-red-600 rounded-full text-white text-xl">✕</button>
-              <button onClick={acceptCall} className="w-14 h-14 bg-green-500 rounded-full text-white text-xl">📹</button>
-            </div>
+        {needLogin && (
+          <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: '#5a4a35' }}>
+            <div style={{ fontSize: 30, marginBottom: 8 }}>🔐</div>
+            Chat is private, so it needs a fresh login.<br />Please <b>log out and log in once</b>, then open chat again.
           </div>
         )}
 
-        {inCall && (
-          <div className="absolute inset-0 bg-black z-50 flex flex-col">
-            <div className="flex-1 relative">
-              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover bg-black" />
-              <video ref={localVideoRef} autoPlay playsInline muted className="absolute bottom-4 right-4 w-24 h-32 object-cover rounded-[10px] border-2 border-white" />
-              <p className="absolute top-4 left-4 bg-black/50 text-white text-[11px] px-2 py-1 rounded">{callStatus || 'Connected'} - {inCall.name}</p>
-            </div>
-            <div className="h-[90px] bg-[#111] flex items-center justify-center gap-6">
-              <button className="w-12 h-12 bg-[#333] rounded-full text-white">🎙️</button>
-              <button onClick={endCall} className="w-14 h-14 bg-red-600 rounded-full text-white font-bold">✕</button>
-              <button className="w-12 h-12 bg-[#333] rounded-full text-white">📹</button>
-            </div>
-          </div>
-        )}
-
-        {!activeChat? (
-          <div className="flex-1 overflow-y-auto">
-            {immediateFamily.map(p => (
-              <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f5f0]">
-                <div onClick={() => setActiveChat({ type: 'direct', id: p.id, name: p.display_name, photo: p.photo_url })} className="flex items-center gap-3 flex-1 cursor-pointer">
-                  <div className="relative">
-                    {p.photo_url? <img src={p.photo_url} className="w-9 h-9 rounded-[8px] object-cover" /> : <div className="w-9 h-9 rounded-[8px] bg-[#c9ad83] text-white flex items-center justify-center font-bold text-[12px]">{p.display_name[0]}</div>}
-                    {isOnline(p.id) && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
-                  </div>
-                  <div className="flex-1 min-w-0"><p className="text-[12px] font-bold truncate">{p.display_name} <span className="text-[9px] text-gray-400">{p.computed_relation}</span></p><p className="text-[10px] text-gray-500">{isOnline(p.id)? 'Online' : p.computed_relation}</p></div>
-                </div>
-                <button onClick={()=> startCall(p)} className="w-7 h-7 bg-white border rounded-full text-[12px]">📹</button>
-              </div>
-            ))}
-            <p className="text-[10px] font-bold text-gray-400 px-4 pt-4 pb-1">YOUR GROUPS</p>
-            {baseGroups.map(g => {
-              const cnt = groupCounts[g.id]?.total?? 0;
-              const onlineCnt = groupCounts[g.id]?.members?.filter(m=> isOnline(m.profile_id || m.id)).length?? 0;
-              return (
-              <div key={g.id} onClick={async () => {
-                const data = await fetch(`/api/group-members?group_id=${g.id}`).then(r=>r.json()).catch(()=>[]);
-                const mems = data.map(row=> ({ id: row.profile_id || row.id, display_name: row.display_name, photo_url: row.photo_url,...row }));
-                setActiveChat({ type: 'group', id: g.id, name: g.name, members: mems });
-              }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f5f0] cursor-pointer">
-                <div className="w-9 h-9 rounded-[8px] bg-black text-white flex items-center justify-center font-bold text-[11px]">{g.name[0]}</div>
-                <div className="flex-1"><p className="text-[12px] font-bold">{g.name}</p><p className="text-[10px] text-gray-500">{cnt} members • {onlineCnt} online</p></div>
-              </div>
-            )})}
-          </div>
-        ) : (
-          <>
-            {activeChat.type === 'group' && (
-              <div className="px-3 py-2 bg-[#f8f5f0] border-b flex gap-2 overflow-x-auto">
-                {activeChat.members?.map(m => (
-                  <div key={m.id} onClick={() => setActiveChat({ type: 'direct', id: m.id, name: m.display_name, photo: m.photo_url })} className="flex flex-col items-center cursor-pointer shrink-0 relative">
-                    <div className="relative">
-                      {m.photo_url? <img src={m.photo_url} className="w-8 h-8 rounded-full object-cover" /> : <div className="w-8 h-8 rounded-full bg-[#c9ad83] text-white flex items-center justify-center text-[10px] font-bold">{m.display_name?.[0]}</div>}
-                      {isOnline(m.id) && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></span>}
-                    </div>
-                    <p className="text-[8px] font-bold mt-1 max-w-[40px] truncate">{m.display_name?.split(' ')[0]}</p>
-                  </div>
-                ))}
+        {/* ---------- chat list ---------- */}
+        {!needLogin && view === 'list' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {convs.length === 0 && (
+              <div style={{ padding: '36px 24px', textAlign: 'center', color: '#8a7a65', fontSize: 13 }}>
+                <div style={{ fontSize: 34, marginBottom: 8 }}>💬</div>
+                No chats yet.<br />Tap <b>＋ New chat</b> to message your family or a group.
               </div>
             )}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-[#fcfaf6]">
-              {messages.map((m,i) => {
-                const isMe = m.sender_id === chatUserId;
-                return <div key={i} className={`flex ${isMe? 'justify-end' : 'justify-start'}`}><div className={`max-w-[72%] px-3 py-2 rounded-[12px] text-[12px] ${isMe? 'bg-black text-white rounded-br-none' : 'bg-white border border-[#e9e2d6] rounded-bl-none'}`}>{m.type==='image'? <img src={m.text} className="rounded-[6px] max-w-[160px]" /> : m.text}</div></div>
-              })}
-              <div ref={messagesEndRef} />
+            {convs.map((c) => (
+              <button key={c.id} type="button" className="cs-row" onClick={() => openConv(c)}>
+                <Avatar p={c.other} name={c.title} group={c.kind === 'group'} online={!!(c.other && online.has(c.other.id))} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: c.unread ? 700 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.kind === 'group' ? '👥 ' : ''}{c.title}</span>
+                    <span style={{ ...small, flexShrink: 0 }}>{c.last_message ? shortWhen(c.last_message.created_at) : ''}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ flex: 1, fontSize: 12, color: c.unread ? '#1a1a1a' : '#8a7a65', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.last_message ? c.last_message.body : 'Say hello 👋'}</span>
+                    {c.unread > 0 && <span style={{ background: '#d33', color: 'white', borderRadius: 10, minWidth: 18, height: 18, padding: '0 5px', boxSizing: 'border-box', fontSize: 10, fontWeight: 700, lineHeight: '18px', textAlign: 'center', flexShrink: 0 }}>{c.unread > 99 ? '99+' : c.unread}</span>}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ---------- new chat ---------- */}
+        {!needLogin && view === 'new' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div style={{ padding: '10px 14px 4px' }}>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search family, friends, anyone on ClanDeck" aria-label="Search people"
+                style={{ width: '100%', boxSizing: 'border-box', height: 36, background: '#f8f5f0', border: '1px solid #e9e2d6', borderRadius: 20, padding: '0 14px', fontSize: 12, outline: 'none' }} />
             </div>
-            <div className="p-2 border-t border-[#e9e2d6] flex items-center gap-1.5 bg-white">
-              <button onClick={() => fileInputRef.current.click()} className="w-8 h-8 bg-[#f8f5f0] border rounded-[8px]">📎</button>
-              <input ref={fileInputRef} type="file" hidden onChange={sendAttachment} />
-              <button onMouseDown={startVoice} onMouseUp={stopVoice} onTouchStart={startVoice} onTouchEnd={stopVoice} className={`w-8 h-8 border rounded-[8px] ${recording? 'bg-red-500 text-white animate-pulse' : 'bg-[#f8f5f0]'}`}>🎙️</button>
-              <input value={newMsg} onChange={e=>setNewMsg(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendText()} placeholder="Type message..." className="flex-1 h-9 bg-[#f8f5f0] border border-[#e9e2d6] rounded-full px-3 text-[12px]" />
-              <button onClick={sendText} className="w-9 h-9 bg-black text-white rounded-full">➤</button>
+            {notice && <div style={{ margin: '6px 14px', padding: '8px 12px', background: '#fff8e1', border: '1px solid #f1dc9a', borderRadius: 10, fontSize: 12 }}>{notice}</div>}
+
+            {shownPeople.length > 0 && <div style={{ ...small, fontWeight: 700, padding: '10px 14px 2px', letterSpacing: 1 }}>FAMILY &amp; FRIENDS</div>}
+            {shownPeople.map((p) => (
+              <button key={p.id} type="button" className="cs-row" onClick={() => startWith(p)}>
+                <Avatar p={p} online={online.has(p.id)} size={34} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.display_name}</div>
+                  <div style={small}>{p.via}{online.has(p.id) ? ' · Online' : ''}</div>
+                </div>
+              </button>
+            ))}
+            {people.length === 0 && !needle && <div style={{ ...small, padding: '10px 14px', fontSize: 12 }}>None of your family or group friends has a ClanDeck login yet. Invite them from your Deck, or search above.</div>}
+
+            {shownFound.length > 0 && <div style={{ ...small, fontWeight: 700, padding: '10px 14px 2px', letterSpacing: 1 }}>OTHER MEMBERS (they must accept first)</div>}
+            {shownFound.map((p) => (
+              <button key={p.id} type="button" className="cs-row" onClick={() => startWith(p)}>
+                <Avatar p={{ photo_url: p.photo }} name={p.display_name} size={34} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.display_name}</div>
+                  <div style={small}>{p.location || 'ClanDeck member'}</div>
+                </div>
+                <span style={{ fontSize: 10, color: '#8a7a65' }}>Send request</span>
+              </button>
+            ))}
+
+            {allGroups.length > 0 && <div style={{ ...small, fontWeight: 700, padding: '12px 14px 2px', letterSpacing: 1 }}>GROUP CHATS</div>}
+            {allGroups.filter((g) => !needle || g.name.toLowerCase().includes(needle)).map((g) => (
+              <button key={g.id} type="button" className="cs-row" onClick={() => startGroup(g)}>
+                <Avatar name={g.name} size={34} group />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
+                  <div style={small}>{g.note}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ---------- conversation ---------- */}
+        {!needLogin && view === 'thread' && active && (
+          <>
+            <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: 12, background: '#fcfaf6', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {hasMore && <button type="button" onClick={older} style={{ alignSelf: 'center', border: '1px solid #d8c5a3', background: '#fff', borderRadius: 14, padding: '4px 12px', fontSize: 11, cursor: 'pointer' }}>Load older messages</button>}
+              {messages.length === 0 && <div style={{ textAlign: 'center', color: '#aaa', fontSize: 12, marginTop: 30 }}>No messages yet. Say hello 👋</div>}
+              {messages.map((m, i) => {
+                const mine = iAm(m);
+                const newDay = i === 0 || dayLabel(messages[i - 1].created_at) !== dayLabel(m.created_at);
+                const sender = who[m.sender_profile_id];
+                return (
+                  <React.Fragment key={m.id}>
+                    {newDay && <div style={{ alignSelf: 'center', fontSize: 10, color: '#8a7a65', background: '#efe8d3', borderRadius: 10, padding: '2px 10px', margin: '6px 0' }}>{dayLabel(m.created_at)}</div>}
+                    <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                      <div style={{ maxWidth: '78%', padding: '7px 11px', borderRadius: 12, borderBottomRightRadius: mine ? 3 : 12, borderBottomLeftRadius: mine ? 12 : 3, fontSize: 13, lineHeight: '18px', background: mine ? '#111' : '#fff', color: mine ? '#fff' : '#1a1a1a', border: mine ? 'none' : '1px solid #e9e2d6', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                        {active.kind === 'group' && !mine && sender && <div style={{ fontSize: 10, fontWeight: 700, color: '#a07b3c', marginBottom: 2 }}>{sender.display_name}</div>}
+                        {m.body}
+                        <div style={{ fontSize: 9, opacity: 0.6, textAlign: 'right', marginTop: 2 }}>{clock(m.created_at)}</div>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+              <div ref={endRef} />
+            </div>
+            {notice && <div style={{ padding: '6px 12px', background: '#fdecea', color: '#b3261e', fontSize: 12 }}>{notice}</div>}
+            <div style={{ padding: 8, borderTop: '1px solid #e9e2d6', display: 'flex', alignItems: 'flex-end', gap: 6, background: '#fff', flexShrink: 0 }}>
+              <button type="button" disabled title="Photos and files are coming soon" style={{ ...round(false), opacity: 0.4, cursor: 'not-allowed', borderRadius: 8 }}>📎</button>
+              <button type="button" disabled title="Voice notes are coming soon" style={{ ...round(false), opacity: 0.4, cursor: 'not-allowed', borderRadius: 8 }}>🎙️</button>
+              <textarea value={draft} rows={1} maxLength={2000} placeholder="Type a message…" aria-label="Message"
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                style={{ flex: 1, minWidth: 0, resize: 'none', maxHeight: 90, background: '#f8f5f0', border: '1px solid #e9e2d6', borderRadius: 18, padding: '8px 12px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              <button type="button" onClick={send} disabled={sending || !draft.trim()} aria-label="Send" style={{ ...round(true), width: 36, height: 36, opacity: sending || !draft.trim() ? 0.5 : 1 }}>➤</button>
             </div>
           </>
         )}
