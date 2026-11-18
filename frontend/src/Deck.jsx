@@ -195,7 +195,7 @@ function buildLayout(me, fam, D) {
 }
 
 // one person in the tree: just the photo, name and relation (no box). Photo zooms up while the mouse is on it.
-function Person({ node, D, isLogin, onPick }) {
+function Person({ node, D, isLogin, onPick, onView }) {
   const { p, rel, center } = node;
   const [imgOk, setImgOk] = useState(true);
   const [hover, setHover] = useState(false);
@@ -204,11 +204,11 @@ function Person({ node, D, isLogin, onPick }) {
   return (
     <button
       type="button"
-      onClick={() => !center && onPick(p, rel)}
-      title={center ? p.display_name : `Open ${p.display_name}'s family`}
+      onClick={() => { if (!center) onPick(p, rel); else if (onView && !isLogin) onView(p); }}
+      title={center ? (onView && !isLogin ? `View ${p.display_name}'s profile` : p.display_name) : `Open ${p.display_name}'s family`}
       style={{
         position: 'absolute', left: node.x, top: node.y, width: D.CW, height: D.CH, padding: 0, border: 'none', background: 'none',
-        font: 'inherit', cursor: center ? 'default' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center',
+        font: 'inherit', cursor: center && !(onView && !isLogin) ? 'default' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center',
         zIndex: hover ? 20 : 1,
       }}
     >
@@ -236,16 +236,16 @@ function Person({ node, D, isLogin, onPick }) {
 }
 
 // one step of the path in Line view
-function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
+function Chip({ item, p, index, isLast, isLogin, x, D, onJump, onView }) {
   const [imgOk, setImgOk] = useState(true);
   const src = photoOf(p);
   const sub = index === 0 ? (isLogin ? 'You' : '') : isLast ? 'Showing' : item.rel;
   return (
     <button
       type="button"
-      disabled={isLast}
-      onClick={() => onJump(index)}
-      title={isLast ? '' : `Go back to ${p ? p.display_name : ''}`}
+      disabled={isLast && !(onView && p && !isLogin)}
+      onClick={() => { if (isLast) { if (onView && p) onView(p); } else onJump(index); }}
+      title={isLast ? (onView && p && !isLogin ? `View ${p.display_name}'s profile` : '') : `Go back to ${p ? p.display_name : ''}`}
       style={{
         position: 'absolute', left: x - D.TW / 2, top: 14, width: D.TW, height: D.TH, padding: 5, boxSizing: 'border-box',
         display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left', font: 'inherit', color: '#1a1a1a',
@@ -274,7 +274,7 @@ function Chip({ item, p, index, isLast, isLogin, x, D, onJump }) {
  *  - Line view: same tree, but the path you followed stays on top as a connected line
  *    (You → Father → Father's sibling → ...). Click any earlier person on the path to jump back to them.
  */
-function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
+function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile }) {
   const D = useDims();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('clandeck_tree_view') === 'line' ? 'line' : 'tree'; } catch { return 'tree'; }
@@ -363,6 +363,11 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
   }, [home]);
 
   const jump = (i) => setTrail((t) => t.slice(0, i + 1));
+  // clicking the person who is already selected opens their profile (view only); the path from me is kept as the breadcrumb
+  const viewSelected = onViewProfile && !(readOnly && trail.length === 1) ? (p) => {
+    const way = readOnly ? '' : ['You', ...trail.slice(1).map((x) => `${x.rel ? x.rel + ': ' : ''}${x.p ? x.p.display_name : ''}`)].join(' › ');
+    onViewProfile(p, way);
+  } : undefined;
 
   // a person was picked in My Groups or in the search box: show their tree, joined to ME by the whole path
   // (e.g. Me > Sister > College friends > Arun). The line before a group member carries the group's name.
@@ -435,7 +440,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
                 {trail.map((item, i) => (
                   <Chip key={item.id + i} item={item} p={profileOf(item, i)} index={i} isLast={i === T - 1} D={D}
                     isLogin={!!myProfileId && profileOf(item, i) && profileOf(item, i).id === myProfileId}
-                    x={cxOf(i)} onJump={jump} />
+                    x={cxOf(i)} onJump={jump} onView={viewSelected} />
                 ))}
               </>
             )}
@@ -448,7 +453,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false }) {
                 {layout.dots.map((d, i) => <circle key={i} cx={d.x} cy={d.y} r={3} fill={LINE} />)}
               </svg>
               {layout.nodes.map((n) => (
-                <Person key={n.p.id + n.rel} node={n} D={D} isLogin={!!myProfileId && n.p.id === myProfileId} onPick={pick} />
+                <Person key={n.p.id + n.rel} node={n} D={D} isLogin={!!myProfileId && n.p.id === myProfileId} onPick={pick} onView={viewSelected} />
               ))}
               {layout.nodes.filter((n) => canInvite(n.p)).map((n) => (
                 <button key={'inv' + n.p.id} type="button" title={`Invite ${n.p.display_name} (temporary login by WhatsApp / SMS)`} aria-label={`Invite ${n.p.display_name}`}
@@ -1178,7 +1183,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
             </div>
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.display_name.split(' ')[0]}'s Family Tree</div>
-              <FamilyTree key={viewing.id} userId={viewing.id} readOnly />
+              <FamilyTree key={viewing.id} userId={viewing.id} readOnly onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); } }} />
             </div>
             </>
           ) : privacy.showFamilyTree!==false ? (
@@ -1187,7 +1192,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
                 <span style={{fontWeight: 600, fontSize:'13px'}}>{isPublic ? getName().split(' ')[0] : 'Hidden'}'s Family Tree {isPublic && profileInfo.nickname ? `(${profileInfo.nickname})` : ''}</span>
                 <span style={{fontSize:'10px', background:'white', padding:'4px 10px', borderRadius:'20px', fontWeight: 500, border:'1px solid #e9e2d6'}}>{visibleFamily.length + 1} Members • {profileInfo.visibility}</span>
               </div>
-              <FamilyTree userId={storedUser?.id || storedUser?.uname} openReq={openReq} />
+              <FamilyTree userId={storedUser?.id || storedUser?.uname} openReq={openReq} onViewProfile={(p, way) => { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); }} />
             </div>
           ) : <div className="card" style={{textAlign:'center', padding:'40px'}}><p style={{color:'#aaa', fontSize:'13px'}}>Family Tree is hidden</p></div>}
         </div>
