@@ -34,6 +34,7 @@ export default function Login({ onLoginSuccess, onGoConstruction }) {
       CACHED_KEYS.forEach((k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
       localStorage.setItem('userId', data.user.id);
       localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem('token', data.token || '');   // secure chat needs it
       localStorage.setItem('uname', data.user.uname || '');
       
       // DIRECTLY LOAD DECK.jsx - NO POPUP
