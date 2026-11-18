@@ -828,7 +828,7 @@ const chatSummary = async (conv, home) => {
   let title = '', other = null;
   if (conv.kind === 'group') { const [g] = await pool.query(`SELECT name FROM profile_groups WHERE id = ? LIMIT 1`, [conv.group_id]); title = g[0] ? g[0].name : 'Group'; }
   else { const o = mems.find((m) => m.profile_id !== home.id); other = o ? people.get(o.profile_id) || null : null; title = other ? other.display_name : 'Chat'; }
-  return { id: conv.id, kind: conv.kind, title, group_id: conv.group_id || null, other, member_count: mems.length, unread: Number(u[0].n) || 0,
+  return { id: conv.id, kind: conv.kind, title, group_id: conv.group_id || null, other, member_count: mems.length, online_count: mems.filter((m) => m.profile_id !== home.id && chatClients.has(m.profile_id)).length, unread: Number(u[0].n) || 0,
     last_message: last ? { id: last.id, sender_profile_id: last.sender_profile_id, body: last.body, created_at: last.created_at } : null,
     last_message_at: conv.last_message_at || conv.created_at };
 };

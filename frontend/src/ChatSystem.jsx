@@ -36,9 +36,20 @@ function Avatar({ p, name, size = 38, group = false, online = false }) {
   );
 }
 
-export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
+// green dot = online, grey dot = offline
+function Status({ online, text }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: online ? '#1f8a37' : '#8a7a65' }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: online ? '#2fb344' : '#c8c0b2', display: 'inline-block' }} />
+      {text || (online ? 'Online' : 'Offline')}
+    </span>
+  );
+}
+
+export default function ChatSystem({ self, allProfiles = [], groups = [], onClose, onUnread }) {
   const token = (() => { try { return localStorage.getItem('token') || ''; } catch { return ''; } })();
   const meKey = self?.id || self?.uname || '';
+  const [treePeople, setTreePeople] = useState([]);
 
   const [view, setView] = useState('list');            // 'list' | 'new' | 'thread'
   const [convs, setConvs] = useState([]);
@@ -86,17 +97,28 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
     if (needLogin) return;
     loadConvs();
     api('/api/chat/people').then((j) => setPeople(j.data)).catch(() => {});
-    if (meKey) fetch(`${API_URL}/api/groups/joined?home_id=${encodeURIComponent(meKey)}`).then((r) => r.json()).then((j) => { if (j.success) setJoined(j.data); }).catch(() => {});
+
   }, [needLogin]); // eslint-disable-line
 
-  // who is online (checked every 20 seconds)
+  // the names of family and groups load even before the fresh login (no token needed)
+  useEffect(() => {
+    if (meKey) fetch(`${API_URL}/api/profiles/family-tree?user_id=${encodeURIComponent(meKey)}`).then((r) => r.json()).then((j) => {
+      if (!j.success) return;
+      const f = j.family || {};
+      const list = [f.father, f.mother, ...(f.siblings || []), ...(f.spouses || []), ...(f.children || [])].filter(Boolean);
+      setTreePeople(list.map((p) => ({ ...p, relation_label: p === f.father ? 'Father' : p === f.mother ? 'Mother' : (f.siblings || []).includes(p) ? 'Sibling' : (f.spouses || []).includes(p) ? 'Spouse' : 'Child' })));
+    }).catch(() => {});
+    if (meKey) fetch(`${API_URL}/api/groups/joined?home_id=${encodeURIComponent(meKey)}`).then((r) => r.json()).then((j) => { if (j.success) setJoined(j.data); }).catch(() => {});
+  }, [meKey]); // eslint-disable-line
+
+  // who is online (checked every 10 seconds)
   useEffect(() => {
     if (needLogin) return undefined;
     const ids = [...new Set([...people.map((p) => p.id), ...convs.map((c) => c.other && c.other.id)].filter(Boolean))];
     if (!ids.length) return undefined;
     const check = () => api(`/api/chat/online?ids=${encodeURIComponent(ids.join(','))}`).then((j) => setOnline(new Set(j.data))).catch(() => {});
     check();
-    const t = setInterval(check, 20000);
+    const t = setInterval(check, 10000);
     return () => clearInterval(t);
   }, [people, convs.length, needLogin]); // eslint-disable-line
 
@@ -150,6 +172,8 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
   };
   const startWith = async (person) => {
     setNotice('');
+    if (needLogin) { setNotice('Log out and log in once, then you can start chatting.'); return; }
+    if (person.noLogin) { setNotice(`${person.display_name} does not have a ClanDeck login yet. Invite them from your Deck first.`); return; }
     try {
       const j = await api('/api/chat/open', { method: 'POST', body: JSON.stringify({ profile_id: person.id }) });
       if (j.needs_request) { setNotice(`Request sent to ${j.name || person.display_name}. You can chat as soon as they accept.`); return; }
@@ -158,6 +182,7 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
   };
   const startGroup = async (g) => {
     setNotice('');
+    if (needLogin) { setNotice('Log out and log in once, then you can open group chats.'); return; }
     try {
       const j = await api('/api/chat/open', { method: 'POST', body: JSON.stringify({ group_id: g.id }) });
       await loadConvs(); openConv(j.conversation);
@@ -187,13 +212,19 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
   const back = () => { setActive(null); setView('list'); setNotice(''); loadConvs(); };
 
   // ---- pieces ------------------------------------------------------------------------------------------------
+  const shownView = needLogin ? 'new' : view;      // before the fresh login the names are still listed, so you can see who is there
   const iAm = (m) => (meId ? m.sender_profile_id === meId : false);
   const activeOnline = active && active.other && online.has(active.other.id);
   const needle = q.trim().toLowerCase();
-  const shownPeople = people.filter((p) => !needle || p.display_name.toLowerCase().includes(needle));
-  const knownIds = new Set(people.map((p) => p.id));
+  const apiIds = new Set(people.map((p) => p.id));
+  const fromDeck = [...(allProfiles || []), ...treePeople].filter((p, i, arr) => p && arr.findIndex((x) => x.id === p.id) === i)
+    .filter((p) => p && p.id && p.display_name && p.id !== meKey && !(p.is_claimed && p.owner_user_id === meKey) && !apiIds.has(p.id))
+    .map((p) => ({ id: p.id, display_name: p.display_name, photo_url: p.photo_compressed_url || p.photo_url || '', via: p.computed_relation || p.relation_label || 'Family', noLogin: !p.is_claimed, is_claimed: !!p.is_claimed }));
+  const contacts = [...people, ...fromDeck].sort((a, b) => (online.has(b.id) - online.has(a.id)) || (!!a.noLogin - !!b.noLogin) || a.display_name.localeCompare(b.display_name));
+  const shownPeople = contacts.filter((p) => !needle || p.display_name.toLowerCase().includes(needle));
+  const knownIds = new Set(contacts.map((p) => p.id));
   const shownFound = found.filter((p) => !knownIds.has(p.id));
-  const allGroups = [...groups.map((g) => ({ id: g.id, name: g.name, note: 'My group' })), ...joined.map((g) => ({ id: g.id, name: g.name, note: `by ${g.owner ? g.owner.display_name : 'someone'}` }))]
+  const allGroups = [...groups.map((g) => ({ id: g.id, name: g.name, note: 'My group', count: Array.isArray(g.members) ? g.members.length + 1 : 0 })), ...joined.map((g) => ({ id: g.id, name: g.name, note: `by ${g.owner ? g.owner.display_name : 'someone'}`, count: g.members.length + (g.owner ? 1 : 0) }))]
     .filter((g, i, a) => g.id && a.findIndex((x) => x.id === g.id) === i);
 
   const head = { height: 54, background: '#efe8d3', borderBottom: '1px solid #e9e2d6', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', flexShrink: 0 };
@@ -216,20 +247,20 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
       <div className="cs-box">
         {/* ---------- header ---------- */}
         <div style={head}>
-          {view === 'thread' && active ? (
+          {shownView === 'thread' && active ? (
             <>
               <button type="button" onClick={back} style={round(false)} aria-label="Back to chats">←</button>
               <Avatar p={active.other} name={active.title} size={34} group={active.kind === 'group'} online={!!activeOnline} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{active.title}</div>
-                <div style={small}>{active.kind === 'group' ? `${active.member_count} members` : activeOnline ? 'Online' : 'Offline'}</div>
+                <div>{active.kind === 'group' ? <span style={small}>{active.member_count} members{active.online_count ? ` · ${active.online_count} online` : ''}</span> : <Status online={!!activeOnline} />}</div>
               </div>
               <button type="button" disabled title="Voice and video calls are coming soon" style={{ ...round(false), opacity: 0.4, cursor: 'not-allowed' }}>📹</button>
             </>
-          ) : view === 'new' ? (
+          ) : shownView === 'new' ? (
             <>
-              <button type="button" onClick={() => { setView('list'); setQ(''); setNotice(''); }} style={round(false)} aria-label="Back to chats">←</button>
-              <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>New chat</div>
+              {!needLogin && <button type="button" onClick={() => { setView('list'); setQ(''); setNotice(''); }} style={round(false)} aria-label="Back to chats">←</button>}
+              <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{needLogin ? '💬 Chats' : 'New chat'}</div>
             </>
           ) : (
             <>
@@ -241,14 +272,13 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
         </div>
 
         {needLogin && (
-          <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: '#5a4a35' }}>
-            <div style={{ fontSize: 30, marginBottom: 8 }}>🔐</div>
-            Chat is private, so it needs a fresh login.<br />Please <b>log out and log in once</b>, then open chat again.
+          <div style={{ padding: '10px 14px', background: '#fff8e1', borderBottom: '1px solid #f1dc9a', fontSize: 12, color: '#5a4a35', flexShrink: 0 }}>
+            🔐 Chat is private, so it needs a fresh login. Please <b>log out and log in once</b>, then chat with the people below.
           </div>
         )}
 
         {/* ---------- chat list ---------- */}
-        {!needLogin && view === 'list' && (
+        {!needLogin && shownView === 'list' && (
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {convs.length === 0 && (
               <div style={{ padding: '36px 24px', textAlign: 'center', color: '#8a7a65', fontSize: 13 }}>
@@ -262,6 +292,7 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                     <span style={{ flex: 1, fontSize: 13, fontWeight: c.unread ? 700 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.kind === 'group' ? '👥 ' : ''}{c.title}</span>
+                    {c.kind === 'group' ? (c.online_count > 0 ? <Status online text={`${c.online_count} online`} /> : null) : <Status online={!!(c.other && online.has(c.other.id))} />}
                     <span style={{ ...small, flexShrink: 0 }}>{c.last_message ? shortWhen(c.last_message.created_at) : ''}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -275,7 +306,7 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
         )}
 
         {/* ---------- new chat ---------- */}
-        {!needLogin && view === 'new' && (
+        {shownView === 'new' && (
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <div style={{ padding: '10px 14px 4px' }}>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search family, friends, anyone on ClanDeck" aria-label="Search people"
@@ -285,18 +316,19 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
 
             {shownPeople.length > 0 && <div style={{ ...small, fontWeight: 700, padding: '10px 14px 2px', letterSpacing: 1 }}>FAMILY &amp; FRIENDS</div>}
             {shownPeople.map((p) => (
-              <button key={p.id} type="button" className="cs-row" onClick={() => startWith(p)}>
-                <Avatar p={p} online={online.has(p.id)} size={34} />
+              <button key={p.id} type="button" className="cs-row" onClick={() => startWith(p)} style={p.noLogin || needLogin ? { opacity: 0.85 } : undefined}>
+                <Avatar p={p} size={34} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.display_name}</div>
-                  <div style={small}>{p.via}{online.has(p.id) ? ' · Online' : ''}</div>
+                  <div style={small}>{p.via}</div>
                 </div>
+                {p.noLogin ? <span style={{ fontSize: 10, color: '#8a7a65', flexShrink: 0 }}>No login yet</span> : needLogin ? null : <Status online={online.has(p.id)} />}
               </button>
             ))}
-            {people.length === 0 && !needle && <div style={{ ...small, padding: '10px 14px', fontSize: 12 }}>None of your family or group friends has a ClanDeck login yet. Invite them from your Deck, or search above.</div>}
+            {contacts.length === 0 && !needle && <div style={{ ...small, padding: '10px 14px', fontSize: 12 }}>No family or group friends yet. Add them from your Deck, or search above.</div>}
 
-            {shownFound.length > 0 && <div style={{ ...small, fontWeight: 700, padding: '10px 14px 2px', letterSpacing: 1 }}>OTHER MEMBERS (they must accept first)</div>}
-            {shownFound.map((p) => (
+            {!needLogin && shownFound.length > 0 && <div style={{ ...small, fontWeight: 700, padding: '10px 14px 2px', letterSpacing: 1 }}>OTHER MEMBERS (they must accept first)</div>}
+            {!needLogin && shownFound.map((p) => (
               <button key={p.id} type="button" className="cs-row" onClick={() => startWith(p)}>
                 <Avatar p={{ photo_url: p.photo }} name={p.display_name} size={34} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -313,7 +345,7 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
                 <Avatar name={g.name} size={34} group />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
-                  <div style={small}>{g.note}</div>
+                  <div style={small}>{g.note}{g.count ? ` · ${g.count} members` : ''}</div>
                 </div>
               </button>
             ))}
@@ -321,7 +353,7 @@ export default function ChatSystem({ self, groups = [], onClose, onUnread }) {
         )}
 
         {/* ---------- conversation ---------- */}
-        {!needLogin && view === 'thread' && active && (
+        {!needLogin && shownView === 'thread' && active && (
           <>
             <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: 12, background: '#fcfaf6', display: 'flex', flexDirection: 'column', gap: 6 }}>
               {hasMore && <button type="button" onClick={older} style={{ alignSelf: 'center', border: '1px solid #d8c5a3', background: '#fff', borderRadius: 14, padding: '4px 12px', fontSize: 11, cursor: 'pointer' }}>Load older messages</button>}

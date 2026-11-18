@@ -928,8 +928,14 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
     if (!token) return undefined;
     const check = () => fetch(`${API_URL}/api/chat/unread`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).then((j) => { if (j && j.success) setChatUnread(j.total); }).catch(() => {});
     check();
-    const t = setInterval(check, 45000);
-    return () => clearInterval(t);
+    const t = setInterval(check, 60000);
+    // keeping one live link open while the Deck is open also shows this person as "Online" to others, and updates the badge at once
+    let es = null;
+    if (typeof EventSource !== 'undefined') {
+      es = new EventSource(`${API_URL}/api/chat/stream?token=${encodeURIComponent(token)}`);
+      es.addEventListener('message', check);
+    }
+    return () => { clearInterval(t); if (es) es.close(); };
   }, []);
   const [groupInvite, setGroupInvite] = useState(null);    // invite pop-up for a friend from My Groups
   const [notes, setNotes] = useState([]);                 // requests waiting for my Accept / Reject
@@ -1218,7 +1224,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         💬
         {chatUnread > 0 && <span style={{position:'absolute', top:'-4px', right:'-4px', minWidth:'18px', height:'18px', padding:'0 5px', boxSizing:'border-box', borderRadius:'9px', background:'#d33', color:'white', fontSize:'10px', fontWeight:700, lineHeight:'18px', textAlign:'center'}}>{chatUnread > 99 ? '99+' : chatUnread}</span>}
       </button>
-      {showChat && <ChatSystem self={storedUser} groups={groups} onUnread={setChatUnread} onClose={()=>setShowChat(false)} />}
+      {showChat && <ChatSystem self={storedUser} allProfiles={family} groups={groups} onUnread={setChatUnread} onClose={()=>setShowChat(false)} />}
     </div>
   );
 }
