@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import clandeckLogo from './assets/clandeck_h.png';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
@@ -7,6 +7,8 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef(null);
+  useEffect(() => { if (searchOpen && searchRef.current) searchRef.current.focus(); }, [searchOpen]);
   let user = self;
   if (!user) { try { user = JSON.parse(localStorage.getItem('user') || '{}'); } catch { user = {}; } }   // a broken saved value must not crash the page
   const initial = (user?.name || user?.display_name || 'S')[0]?.toUpperCase();
@@ -101,14 +103,19 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
         @media(max-width: 1100px){ .center-area { max-width: 320px; } }
         @media(max-width: 900px){ .center-area { max-width: 200px; } .search-input::placeholder { font-size:11px; } }
         @media(max-width: 650px){
-          .header-inner { padding: 0 12px; height: 56px; }
-          .center-area { max-width:none; flex:0; margin-left:auto; }
-          .search-wrap .search-input { display: ${searchOpen ? 'block' : 'none'}; position: absolute; right: 0; top: 50px; width: 92vw; max-width: 92vw; z-index: 200; box-shadow: 0 4px 20px rgba(0,0,0,0.1); background: white; padding: 12px 14px 12px 36px; }
-          .search-wrap .search-icon-abs { display: ${searchOpen ? 'block' : 'none'}; position: absolute; right: 0; top: 50px; margin-top: 12px; left: 12px; z-index: 201; }
-          .search-icon-btn { display:${searchOpen ? 'none' : 'flex'}; }
-          .nav-desktop { display:${open ? 'flex' : 'none'}; position:absolute; top:56px; left:0; width:100%; background:white; flex-direction:column; padding:12px 16px 16px; border-bottom:1px solid #e9e2d6; gap:10px; align-items:stretch; box-sizing:border-box; }
-          .hamburger { display:block; }
+          .header-inner { padding: 6px 12px 8px; height: auto; min-height: 52px; flex-wrap: wrap; row-gap: 8px; }
+          .left-area { display: contents; }
+          .center-area { max-width:none; flex:0 0 auto; margin-left:auto; min-width:0; }
+          /* Your Deck / Profile Edit stay visible as a second row, no menu to open */
+          .nav-desktop { order: 10; flex: 1 1 100%; display:flex; gap:8px; }
+          .nav-desktop button { flex:1; padding:7px 8px !important; }
+          .hamburger { display:none !important; }
           .logo-img { height: 22px; }
+          /* search icon opens a bar that is exactly centred on the screen */
+          .search-wrap { ${searchOpen ? 'position:fixed; left:4vw; right:4vw; top:56px; z-index:200;' : ''} }
+          .search-wrap .search-input { display: ${searchOpen ? 'block' : 'none'}; width:100%; box-shadow: 0 4px 20px rgba(0,0,0,0.15); background: white; padding: 12px 14px 12px 36px; font-size:14px; }
+          .search-wrap .search-icon-abs { display: ${searchOpen ? 'block' : 'none'}; }
+          .search-icon-btn { display:${searchOpen ? 'none' : 'flex'}; }
         }
       `}</style>
 
@@ -126,6 +133,7 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
           <div className="search-wrap">
             <span className="search-icon-abs" style={{position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', fontSize:'13px', color:'#a09078', pointerEvents:'none'}}>🔍</span>
             <input 
+              ref={searchRef}
               className="search-input"
               type="text" 
               placeholder="Find your FamilyMember, Friends, Your Clan"
@@ -147,14 +155,13 @@ export default function CommonHeader({ self, onDeck, onProfile, onLogout, onSear
             {savedPhoto && photoOk ? <img src={savedPhoto} alt="" onError={()=>setPhotoOk(false)} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : initial}
           </div>
           <button onClick={handleLogout} style={{padding:'7px 12px', background:'#fff5f5', border:'1px solid #ffd1d1', borderRadius:'20px', fontSize:'11px', fontWeight:700, color:'#d33', cursor:'pointer'}}>Logout</button>
-          <button className="hamburger" aria-label="Menu" aria-expanded={open} onClick={()=>setOpen(!open)}>{open ? '✕' : '☰'}</button>
         </div>
       </div>
 
       {searchOpen && (
         <div style={{display:'none'}} className="mobile-search-overlay">
           <style>{`@media(max-width:650px){ .mobile-search-overlay{display:block !important;} }`}</style>
-          <div onClick={()=>setSearchOpen(false)} style={{position:'fixed', top:'56px', left:0, width:'100vw', height:'100vh', background:'rgba(0,0,0,0.2)', zIndex:99}}></div>
+          <div onClick={()=>setSearchOpen(false)} style={{position:'fixed', top:'0', left:0, width:'100vw', height:'100vh', background:'rgba(0,0,0,0.2)', zIndex:99}}></div>
         </div>
       )}
     </header>
