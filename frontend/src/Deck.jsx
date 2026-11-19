@@ -296,6 +296,15 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
 
   useEffect(() => { setTrail([{ id: userId, rel: '' }]); }, [userId]);
 
+  // opened straight onto a line (from search): my own card at the start of the line still needs its name and photo
+  useEffect(() => {
+    if (home || readOnly || !userId) return undefined;
+    let dead = false;
+    fetch(`${API_URL}/api/profiles/family-tree?user_id=${encodeURIComponent(userId)}`).then((r) => r.json()).then((j) => { if (!dead && j.success && j.myProfile) { setHome(j.myProfile); setMyProfileId(j.myProfile.id); } }).catch(() => {});
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, readOnly, !!home]);
+
   useEffect(() => {
     if (!focusId) return;
     let alive = true;
@@ -333,7 +342,10 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
   // keep the selected person in the horizontal middle of the view
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && layout) el.scrollLeft = Math.max(0, (W * scale) / 2 - el.clientWidth / 2);
+    if (!el || !layout) return;
+    // line view: when the whole line fits, start at the left so it begins with ME; otherwise keep the selected person in the middle
+    const lineFits = lineMode && T > 1 && (W / 2 + D.TW / 2 + D.PAD) * scale <= el.clientWidth;
+    el.scrollLeft = lineFits ? 0 : Math.max(0, (W * scale) / 2 - el.clientWidth / 2);
   }, [layout, W, scale]);
 
   // watch the width of the box the tree lives in
@@ -375,6 +387,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
   useEffect(() => {
     if (!openReq || lastReq.current === openReq.n) return;
     lastReq.current = openReq.n;
+    setView('line');   // coming from search: show the line  Me > friend > ... > person
     setTrail((t) => {
       if (!t.length) return t;
       const items = (openReq.path || [])
@@ -772,7 +785,7 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
   const how = (r) => {
     const names = r.path.slice(0, -1).map((x) => x.p.display_name.split(' ')[0]);
     if (r.kind === 'member') return 'Member · view profile';
-    if (r.kind === 'group') return `${r.owner ? `${r.owner}'s` : 'Your'} group · ${r.group}`;
+    if (r.kind === 'group' && r.path.length <= 1) return `${r.owner ? `${r.owner}'s` : 'Your'} group · ${r.group}`;
     return r.path.map((x) => x.rel).join(' › ') + (names.length ? ` (via ${names.join(' › ')})` : '');
   };
   return (
@@ -1108,7 +1121,10 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
           setSearchOpen(false);
           // every search result opens that person's profile (view only); the path from me is shown above it
           const way = r.kind === 'member' ? '' : ['You', ...r.path.map((x) => `${x.rel ? x.rel + ': ' : ''}${x.p.display_name}`)].join(' › ');
-          setViewing({ ...r.person, way });
+          // people connected to me: the line view starts from ME and follows the path (Me > Sanu > Meenu > Meenu's father)
+          const connected = r.kind !== 'member';
+          if (connected) setOpenReq({ n: Date.now(), path: r.path });
+          setViewing({ ...r.person, way, inMyTree: connected });
           window.scrollTo({ top: 0 });
         }} />}
 
@@ -1198,8 +1214,10 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
               ))}
             </div>
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
-              <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.display_name.split(' ')[0]}'s Family Tree</div>
-              <FamilyTree key={viewing.id} userId={viewing.id} readOnly onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); } }} />
+              <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.inMyTree ? `Your line to ${viewing.display_name}` : `${viewing.display_name.split(' ')[0]}'s Family Tree`}</div>
+              {viewing.inMyTree
+                ? <FamilyTree key="mine" userId={storedUser?.id || storedUser?.uname} openReq={openReq} onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way, inMyTree: true }); window.scrollTo({ top: 0 }); } }} />
+                : <FamilyTree key={viewing.id} userId={viewing.id} readOnly onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); } }} />}
             </div>
             </>
           ) : privacy.showFamilyTree!==false ? (

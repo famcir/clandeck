@@ -654,53 +654,61 @@ app.get('/api/search', async (req, res) => {
     const famIds = [...fam];
     const ph = (a) => a.map(() => '?').join(',');
 
-    // how everybody in the family connects to me (shortest path through the relation rows)
-    const [rels] = await pool.query(`SELECT owner_profile_id AS a, related_profile_id AS b, relation_type AS t FROM profile_relations WHERE owner_profile_id IN (${ph(famIds)})`, famIds);
-    const adj = new Map();
-    rels.forEach((r) => { if (!adj.has(r.a)) adj.set(r.a, []); adj.get(r.a).push({ id: r.b, t: r.t }); });
+    // how everybody connects to me: through family relations, and then also through my friends (group members) and THEIR families,
+    // so "Meenu's father" is found as  Me > Sanu (friend) > Meenu (wife) > her father
+    const rowsOf = new Map();
+    const loadRels = async (ids) => {
+      const need = ids.filter((id) => !rowsOf.has(id));
+      if (!need.length) return;
+      need.forEach((id) => rowsOf.set(id, []));
+      const [rs] = await pool.query(`SELECT owner_profile_id AS a, related_profile_id AS b, relation_type AS t FROM profile_relations WHERE owner_profile_id IN (${ph(need)})`, need);
+      rs.forEach((r) => rowsOf.get(r.a).push({ id: r.b, t: r.t }));
+    };
+    await loadRels(famIds);
     const prev = new Map([[home.id, null]]);
+    const outside = new Set();      // reached through a group (friend), not through my own family
     for (let queue = [home.id]; queue.length;) {
       const next = [];
-      for (const cur of queue) for (const e of adj.get(cur) || []) if (!prev.has(e.id)) { prev.set(e.id, { from: cur, t: e.t }); next.push(e.id); }
+      for (const cur of queue) for (const e of rowsOf.get(cur) || []) if (!prev.has(e.id)) { prev.set(e.id, { from: cur, t: e.t }); next.push(e.id); }
       queue = next;
     }
-    const pathTo = (id) => { const out = []; for (let c = id; prev.get(c); c = prev.get(c).from) out.unshift({ id: c, rel: prev.get(c).t }); return out; };
-
-    // 1) relatives whose name matches
-    const [famHits] = await pool.query(
-      `SELECT id FROM profiles WHERE id IN (${ph(famIds)}) AND id <> ? AND (display_name LIKE ? OR nickname LIKE ?) LIMIT 40`, [...famIds, home.id, like, like]);
-    const hits = new Map();   // person id -> { kind, path:[{id,rel}], group?, owner? }
-    famHits.forEach((r) => { if (prev.has(r.id)) hits.set(r.id, { kind: 'family', path: pathTo(r.id) }); });
-
-    // 2) people in groups (mine, or shared with the family by a relative)
-    const [named] = await pool.query(`SELECT id, is_claimed, visibility, owner_user_id FROM profiles WHERE (display_name LIKE ? OR nickname LIKE ?) AND id <> ? LIMIT 200`, [like, like, home.id]);
-    const namedMap = new Map(named.map((p) => [p.id, p]));
-    if (named.length) {
-      const [ms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE COALESCE(status,'accepted') <> 'pending' AND profile_id IN (${ph(named)})`, named.map((p) => p.id));
-      const gids = [...new Set(ms.map((m) => m.group_id))];
-      if (gids.length) {
-        const [gs] = await pool.query(`SELECT id, name, owner_profile_id, visibility FROM profile_groups WHERE id IN (${ph(gids)})`, gids);
-        const gmap = new Map(gs.map((g) => [g.id, g]));
-        ms.forEach((m) => {
-          const g = gmap.get(m.group_id); if (!g || hits.get(m.profile_id)?.kind === 'family') return;
-          const mine = g.owner_profile_id === home.id;
-          if (!mine && !(g.visibility === 'family' && prev.has(g.owner_profile_id))) return;
-          const P = namedMap.get(m.profile_id);
-          if (!mine && P && P.is_claimed && String(P.visibility || 'public').toLowerCase() === 'private') return;   // their own privacy wins
-          const path = [...pathTo(g.owner_profile_id), { id: m.profile_id, rel: g.name }];
-          const old = hits.get(m.profile_id);
-          if (!old || path.length < old.path.length) hits.set(m.profile_id, { kind: 'group', path, group: g.name, owner: g.owner_profile_id });
-        });
-      }
+    // group members: my groups, and groups a relative shared with the family
+    const [grs] = await pool.query(`SELECT id, name, owner_profile_id, visibility FROM profile_groups WHERE owner_profile_id IN (${ph(famIds)})`, famIds);
+    const okGroups = grs.filter((g) => g.owner_profile_id === home.id || g.visibility === 'family');
+    let seeds = [];
+    if (okGroups.length) {
+      const [gms] = await pool.query(`SELECT group_id, profile_id FROM profile_group_members WHERE COALESCE(status,'accepted') <> 'pending' AND group_id IN (${ph(okGroups)})`, okGroups.map((g) => g.id));
+      const gm = new Map(okGroups.map((g) => [g.id, g]));
+      gms.forEach((m) => { const g = gm.get(m.group_id); if (g && !prev.has(m.profile_id)) { prev.set(m.profile_id, { from: g.owner_profile_id, t: g.name, g: true }); outside.add(m.profile_id); seeds.push(m.profile_id); } });
     }
+    // ... and on from each friend into THEIR family (a few steps, so it stays quick)
+    for (let depth = 0; depth < 4 && seeds.length && prev.size < 800; depth++) {
+      await loadRels(seeds);
+      const next = [];
+      for (const cur of seeds) for (const e of rowsOf.get(cur) || []) if (!prev.has(e.id)) { prev.set(e.id, { from: cur, t: e.t }); outside.add(e.id); next.push(e.id); }
+      seeds = next;
+    }
+    const pathTo = (id) => { const out = []; for (let c = id; prev.get(c); c = prev.get(c).from) out.unshift({ id: c, rel: prev.get(c).t }); return out; };
+    const groupEdgeOf = (id) => { let found = null; for (let c = id; prev.get(c); c = prev.get(c).from) if (prev.get(c).g) found = prev.get(c); return found; };
 
-    // 3) every other member with an account (public profiles only) - opened in view-only mode
-    const [others] = await pool.query(
-      `SELECT id FROM profiles WHERE is_claimed = 1 AND id <> ? AND LOWER(COALESCE(visibility, 'public')) <> 'private' AND (display_name LIKE ? OR nickname LIKE ?) LIMIT 30`, [home.id, like, like]);
-    others.forEach((r) => { if (!hits.has(r.id)) hits.set(r.id, { kind: 'member', path: [{ id: r.id, rel: 'Member' }] }); });
+    // every profile whose name matches. Private profiles stay hidden (unless they are in my own family or my own group)
+    const [named] = await pool.query(`SELECT id, is_claimed, visibility FROM profiles WHERE (display_name LIKE ? OR nickname LIKE ?) AND id <> ? LIMIT 300`, [like, like, home.id]);
+    const hits = new Map();   // person id -> { kind, path:[{id,rel}], group?, owner? }
+    named.forEach((p) => {
+      const isPrivate = String(p.visibility || 'public').toLowerCase() === 'private';
+      if (prev.has(p.id)) {
+        if (!outside.has(p.id)) { hits.set(p.id, { kind: 'family', path: pathTo(p.id) }); return; }
+        const edge = groupEdgeOf(p.id);
+        const myOwnFriend = edge && prev.get(p.id).g && edge.from === home.id;
+        if (isPrivate && !myOwnFriend) return;
+        hits.set(p.id, { kind: 'group', path: pathTo(p.id), group: edge ? edge.t : '', owner: edge ? edge.from : null });
+      } else if (!isPrivate) {
+        hits.set(p.id, { kind: 'member', path: [{ id: p.id, rel: p.is_claimed ? 'Member' : 'Profile' }], claimed: p.is_claimed ? 1 : 0 });
+      }
+    });
 
     const rank = (k) => (k === 'family' ? 0 : k === 'group' ? 1 : 2);
-    const list = [...hits.entries()].sort((a, b) => rank(a[1].kind) - rank(b[1].kind) || a[1].path.length - b[1].path.length).slice(0, 20);
+    const list = [...hits.entries()].sort((a, b) => rank(a[1].kind) - rank(b[1].kind) || a[1].path.length - b[1].path.length || (b[1].claimed || 0) - (a[1].claimed || 0)).slice(0, 20);
     const need = [...new Set(list.flatMap(([, h]) => h.path.map((x) => x.id)))];
     const pmap = new Map();
     if (need.length) {
