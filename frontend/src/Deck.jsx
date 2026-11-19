@@ -236,7 +236,7 @@ function Person({ node, D, isLogin, onPick, onView }) {
 }
 
 // one step of the path in Line view
-function Chip({ item, p, index, isLast, isLogin, x, D, onJump, onView }) {
+function Chip({ item, p, index, isLast, isLogin, x, y = 14, D, onJump, onView }) {
   const [imgOk, setImgOk] = useState(true);
   const src = photoOf(p);
   const sub = index === 0 ? (isLogin ? 'You' : '') : isLast ? 'Showing' : item.rel;
@@ -247,7 +247,7 @@ function Chip({ item, p, index, isLast, isLogin, x, D, onJump, onView }) {
       onClick={() => { if (isLast) { if (onView && p) onView(p); } else onJump(index); }}
       title={isLast ? (onView && p && !isLogin ? `View ${p.display_name}'s profile` : '') : `Go back to ${p ? p.display_name : ''}`}
       style={{
-        position: 'absolute', left: x - D.TW / 2, top: 14, width: D.TW, height: D.TH, padding: 5, boxSizing: 'border-box',
+        position: 'absolute', left: x - D.TW / 2, top: y, width: D.TW, height: D.TH, padding: 5, boxSizing: 'border-box',
         display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left', font: 'inherit', color: '#1a1a1a',
         background: isLast ? '#fffaf0' : '#fff', border: isLast ? '2px solid #1a1a1a' : '1px solid #e3d3b3',
         borderRadius: 10, cursor: isLast ? 'default' : 'pointer',
@@ -332,9 +332,12 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
 
   const lineMode = view === 'line';
   const T = trail.length;
-  const trailLeft = (T - 1) * (D.TW + D.EW) + D.TW / 2;
-  const trailH = lineMode ? D.TRAIL_H : 0;
-  const W = layout ? (lineMode ? Math.max(layout.width, 2 * (trailLeft + D.PAD)) : layout.width) : 0;
+  // line view: the line wraps onto the next row (with a connecting arrow) when it does not fit the width
+  const W = layout ? (lineMode ? Math.max(layout.width, fitW || 0, 2 * D.PAD + D.TW) : layout.width) : 0;
+  const per = lineMode ? Math.max(1, Math.floor((W - 2 * D.PAD + D.EW) / (D.TW + D.EW))) : 1;   // how many people fit in one row
+  const rowH = D.TH + 46;
+  const rows = lineMode ? Math.ceil(T / per) : 0;
+  const trailH = lineMode ? D.TRAIL_H + Math.max(0, rows - 1) * rowH : 0;
   // shrink the whole tree to fit the space it has (never below 55%, after that it scrolls inside its own box)
   const scale = W && fitW ? Math.min(1, Math.max(0.55, fitW / W)) : 1;
   const needScroll = W * scale > fitW + 1;
@@ -343,9 +346,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || !layout) return;
-    // line view: when the whole line fits, start at the left so it begins with ME; otherwise keep the selected person in the middle
-    const lineFits = lineMode && T > 1 && (W / 2 + D.TW / 2 + D.PAD) * scale <= el.clientWidth;
-    el.scrollLeft = lineFits ? 0 : Math.max(0, (W * scale) / 2 - el.clientWidth / 2);
+    el.scrollLeft = Math.max(0, (W * scale) / 2 - el.clientWidth / 2);
   }, [layout, W, scale]);
 
   // watch the width of the box the tree lives in
@@ -401,7 +402,10 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
   const goHome = () => setTrail((t) => t.slice(0, 1));
 
   const chipY = 14 + D.TH / 2;
-  const cxOf = (i) => W / 2 - (T - 1 - i) * (D.TW + D.EW);
+  const nRow = Math.min(per, T);
+  const rowLeft = (W - (nRow * D.TW + (nRow - 1) * D.EW)) / 2;
+  const cxOf = (i) => rowLeft + D.TW / 2 + (i % per) * (D.TW + D.EW);
+  const topOf = (i) => 14 + Math.floor(i / per) * rowH;
   const canInvite = (p) => !readOnly && !!(p && home && !p.is_claimed && p.id !== home.id && p.owner_user_id && p.owner_user_id === home.owner_user_id);
   const profileOf = (item, i) => item.p || (i === 0 ? home : null);
 
@@ -430,22 +434,43 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
                 <svg width={W} height={trailH} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}>
                   {trail.slice(1).map((item, k) => {
                     const i = k + 1;
-                    const x1 = cxOf(i - 1) + D.TW / 2, x2 = cxOf(i) - D.TW / 2;
+                    const sameRow = Math.floor((i - 1) / per) === Math.floor(i / per);
+                    if (sameRow) {
+                      const y = topOf(i) + D.TH / 2, x1 = cxOf(i - 1) + D.TW / 2, x2 = cxOf(i) - D.TW / 2;
+                      return (
+                        <g key={i}>
+                          <path d={`M${x1} ${y} L${x2 - 2} ${y}`} stroke={LINE} strokeWidth={LINE_W} />
+                          <path d={`M${x2} ${y} l-7 -4.5 l0 9 z`} fill={LINE} />
+                        </g>
+                      );
+                    }
+                    // end of a row: the arrow drops down and runs back to the start of the next row
+                    const yA = topOf(i - 1) + D.TH, yMid = yA + 23, yB = topOf(i);
                     return (
                       <g key={i}>
-                        <path d={`M${x1} ${chipY} L${x2 - 2} ${chipY}`} stroke={LINE} strokeWidth={LINE_W} />
-                        <path d={`M${x2} ${chipY} l-7 -4.5 l0 9 z`} fill={LINE} />
+                        <path d={`M${cxOf(i - 1)} ${yA} L${cxOf(i - 1)} ${yMid} L${cxOf(i)} ${yMid} L${cxOf(i)} ${yB - 2}`} fill="none" stroke={LINE} strokeWidth={LINE_W} strokeLinejoin="round" />
+                        <path d={`M${cxOf(i)} ${yB} l-4.5 -7 l9 0 z`} fill={LINE} />
                       </g>
                     );
                   })}
-                  <path d={`M${W / 2} ${14 + D.TH} L${W / 2} ${trailH - 4}`} stroke={LINE} strokeWidth={LINE_W} strokeDasharray="4 4" />
-                  <path d={`M${W / 2} ${trailH} l-5 -8 l10 0 z`} fill={LINE} />
+                  {(() => {
+                    const lx = cxOf(T - 1), yA = topOf(T - 1) + D.TH, yMid = yA + 18;
+                    return (
+                      <>
+                        <path d={`M${lx} ${yA} L${lx} ${yMid} L${W / 2} ${yMid} L${W / 2} ${trailH - 4}`} fill="none" stroke={LINE} strokeWidth={LINE_W} strokeDasharray="4 4" />
+                        <path d={`M${W / 2} ${trailH} l-5 -8 l10 0 z`} fill={LINE} />
+                      </>
+                    );
+                  })()}
                 </svg>
                 {trail.slice(1).map((item, k) => {
                   const i = k + 1;
-                  const mx = (cxOf(i - 1) + D.TW / 2 + cxOf(i) - D.TW / 2) / 2;
+                  const sameRow = Math.floor((i - 1) / per) === Math.floor(i / per);
+                  const y = sameRow ? topOf(i) + D.TH / 2 : topOf(i - 1) + D.TH + 23;
+                  const mx = sameRow ? (cxOf(i - 1) + D.TW / 2 + cxOf(i) - D.TW / 2) / 2 : (cxOf(i - 1) + cxOf(i)) / 2;
+                  const w = D.EW - 4;
                   return (
-                    <span key={'l' + i} title={item.rel} style={{ position: 'absolute', left: mx - (D.EW - 4) / 2, width: D.EW - 4, top: chipY - 6, transform: 'translateY(-100%)', textAlign: 'center', fontSize: 11, lineHeight: '12px', fontWeight: 600, color: '#8a7a5c', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                    <span key={'l' + i} title={item.rel} style={{ position: 'absolute', left: Math.max(2, mx - w / 2), width: w, top: y - 4, transform: 'translateY(-100%)', textAlign: 'center', fontSize: 11, lineHeight: '12px', fontWeight: 600, color: '#8a7a5c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.rel}
                     </span>
                   );
@@ -453,7 +478,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
                 {trail.map((item, i) => (
                   <Chip key={item.id + i} item={item} p={profileOf(item, i)} index={i} isLast={i === T - 1} D={D}
                     isLogin={!!myProfileId && profileOf(item, i) && profileOf(item, i).id === myProfileId}
-                    x={cxOf(i)} onJump={jump} onView={viewSelected} />
+                    x={cxOf(i)} y={topOf(i)} onJump={jump} onView={viewSelected} />
                 ))}
               </>
             )}
@@ -1130,7 +1155,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
 
       {viewing && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#eef4ff', border:'1px solid #c9daf8', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
-          <span style={{flex:1, minWidth:0}}>👁 You are viewing <b>{viewing.display_name}</b>'s profile (view only){viewing.way && <span style={{display:'block', fontSize:'11px', color:'#5a6b8a', marginTop:2, wordBreak:'break-word'}}>{viewing.way}</span>}</span>
+          <span style={{flex:1, minWidth:0}}>👁 You are viewing <b>{viewing.display_name}</b>'s profile (view only){viewing.way && !viewing.inMyTree && <span style={{display:'block', fontSize:'11px', color:'#5a6b8a', marginTop:2, wordBreak:'break-word'}}>{viewing.way}</span>}</span>
           <button type="button" onClick={() => setViewing(null)} style={{padding:'8px 16px', borderRadius:'20px', border:'none', background:'#111', color:'white', fontWeight: 500, fontSize:'11px', cursor:'pointer'}}>← Back to my deck</button>
         </div>
       )}
