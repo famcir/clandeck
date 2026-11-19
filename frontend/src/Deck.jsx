@@ -334,12 +334,13 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
   const T = trail.length;
   // line view: the line wraps onto the next row (with a connecting arrow) when it does not fit the width
   const W = layout ? (lineMode ? Math.max(layout.width, fitW || 0, 2 * D.PAD + D.TW) : layout.width) : 0;
-  const per = lineMode ? Math.max(1, Math.floor((W - 2 * D.PAD + D.EW) / (D.TW + D.EW))) : 1;   // how many people fit in one row
+  const avail = Math.min(W, fitW || W);   // the width you can see at once; the line wraps to it
+  const per = lineMode ? Math.max(1, Math.floor((avail - 2 * D.PAD + D.EW) / (D.TW + D.EW))) : 1;   // how many people fit in one row
   const rowH = D.TH + 46;
   const rows = lineMode ? Math.ceil(T / per) : 0;
   const trailH = lineMode ? D.TRAIL_H + Math.max(0, rows - 1) * rowH : 0;
   // shrink the whole tree to fit the space it has (never below 55%, after that it scrolls inside its own box)
-  const scale = W && fitW ? Math.min(1, Math.max(0.55, fitW / W)) : 1;
+  const scale = 1;   // people keep their normal size; a big tree scrolls (sideways and up/down) inside its own box
   const needScroll = W * scale > fitW + 1;
 
   // keep the selected person in the horizontal middle of the view
@@ -403,7 +404,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
 
   const chipY = 14 + D.TH / 2;
   const nRow = Math.min(per, T);
-  const rowLeft = (W - (nRow * D.TW + (nRow - 1) * D.EW)) / 2;
+  const rowLeft = (W - (nRow * D.TW + (nRow - 1) * D.EW)) / 2;   // centred on the selected person
   const cxOf = (i) => rowLeft + D.TW / 2 + (i % per) * (D.TW + D.EW);
   const topOf = (i) => 14 + Math.floor(i / per) * rowH;
   const canInvite = (p) => !readOnly && !!(p && home && !p.is_claimed && p.id !== home.id && p.owner_user_id && p.owner_user_id === home.owner_user_id);
@@ -425,7 +426,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
       {loading && !data && <div style={{ padding: 24, color: '#8a7a5c', fontWeight: 600, fontSize: 12 }}>Loading family tree…</div>}
 
       {layout && (
-        <div ref={scrollRef} style={{ overflowX: needScroll ? 'auto' : 'hidden', overflowY: 'hidden', opacity: loading ? 0.5 : 1, transition: 'opacity .15s' }}>
+        <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '78vh', opacity: loading ? 0.5 : 1, transition: 'opacity .15s' }}>
          <div style={{ position: 'relative', width: W * scale, height: (trailH + layout.height) * scale, margin: '0 auto' }}>
           <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: trailH + layout.height, transformOrigin: '0 0', transform: scale < 1 ? `scale(${scale})` : 'none' }}>
 
