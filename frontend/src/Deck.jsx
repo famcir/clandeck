@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import CommonHeader from './CommonHeader.jsx';
 import ChatSystem from './ChatSystem.jsx';
-import mangoBasket from './assets/mango-basket.png';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://api.clandeck.com';
 
@@ -837,6 +836,36 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
 }
 
 // ================= REQUESTS: "X added you ... Accept / Reject" =================
+// ================= CARDS IN DECK + POINTS (public: everyone can see anyone's cards and points) =================
+function PointsBox({ profileId, mine = false }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    if (!profileId) return undefined;
+    let dead = false;
+    const load = () => fetch(`${API_URL}/api/points/${encodeURIComponent(profileId)}`).then((r) => r.json()).then((j) => { if (!dead) setD(j && j.success ? j : null); }).catch(() => {});
+    setD(null);
+    load();
+    const t = setInterval(load, 60000);
+    return () => { dead = true; clearInterval(t); };
+  }, [profileId]);
+  const fmt = (n) => (Math.round(Number(n || 0) * 100) / 100).toFixed(2).replace(/\.?0+$/, (m) => (m === '.00' ? '' : m));
+  const tile = (value, label, bg) => (
+    <div style={{flex:1, minWidth:0, background:bg, borderRadius:'12px', padding:'10px 6px'}}>
+      <div style={{fontSize:'22px', fontWeight:700, lineHeight:'26px'}}>{d ? value : '–'}</div>
+      <div style={{fontSize:'10px', letterSpacing:'1px', color:'#6b6358', fontWeight:600, marginTop:2}}>{label}</div>
+    </div>
+  );
+  return (
+    <div style={{marginTop:'14px'}}>
+      <div style={{display:'flex', gap:'8px'}}>
+        {tile(d ? d.cards : 0, d && d.cards === 1 ? 'CARD IN DECK' : 'CARDS IN DECK', '#f3ead8')}
+        {tile(d ? fmt(d.points) : 0, 'POINTS', '#fdebc4')}
+      </div>
+      <p style={{fontSize:'10px', color:'#aaa', margin:'8px 0 0', lineHeight:'14px'}}>{mine ? 'Every person who accepts your request is a card in your deck. Everyone can see your points.' : 'Cards in deck and points are public.'}</p>
+    </div>
+  );
+}
+
 function NoticeBar({ notes, busyId, onAnswer, onOpen }) {
   if (!notes.length) return null;
   const text = (n) => {
@@ -1192,6 +1221,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
                 </div>
               )}
               {viewInfo && viewInfo.error && <p style={{fontSize:'12px', color:'#b3261e', marginTop:10}}>{viewInfo.error}</p>}
+              <PointsBox profileId={viewing.id} />
             </div>
           ) : (
           <div className="card" style={{textAlign:'center'}}>
@@ -1211,12 +1241,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
               <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>VISIBILITY</span><span style={{fontWeight: 500, color: profileInfo.visibility==='public' ? 'green' : 'red'}}>{profileInfo.visibility?.toUpperCase()}</span></div>
             </div>
 
-            {privacy.showMangoes!==false && (
-              <>
-                <div style={{marginTop:'14px'}}><img src={mangoBasket} alt="basket" style={{width:'54px', height:'54px', margin:'0 auto', display:'block'}} /></div>
-                <p style={{fontSize:'8px', letterSpacing:'2px', color:'#aaa', fontWeight: 600, marginTop:'4px'}}>MANGOS IN BASKET</p>
-              </>
-            )}
+            <PointsBox profileId={storedUser?.id || storedUser?.uname} mine />
           </div>
           )}
         </div>
