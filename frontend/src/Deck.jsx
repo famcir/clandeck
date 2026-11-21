@@ -836,8 +836,22 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
 }
 
 // ================= REQUESTS: "X added you ... Accept / Reject" =================
+// ================= LANGUAGE (English / Malayalam / Hindi) =================
+// Covers the words on this page. Other pages follow later. Malayalam and Hindi wording is a first draft for a native speaker to check.
+const LANGS = [['en', 'English'], ['ml', 'മലയാളം'], ['hi', 'हिन्दी']];
+const STR = {
+  en: { points: 'POINTS', cards: 'CARDS IN DECK', card: 'CARD IN DECK', family: 'FAMILY MEMBERS', groups: 'GROUPS', openChats: 'Open chats', editProfile: 'Edit profile', about: 'ABOUT', userId: 'USER ID', name: 'NAME', nick: 'NICK NAME', visibility: 'VISIBILITY', gender: 'GENDER', born: 'BORN', status: 'STATUS', location: 'LOCATION', living: 'Living', passed: 'Passed away', photos: 'Photos and videos', news: 'News corner', scrap: 'Scrap wall', soon: 'coming soon', hidden: 'Hidden', language: 'Language', member: 'Member of ClanDeck', added: 'Added by a relative or friend', publicNote: 'Everyone can see cards and points' },
+  ml: { points: 'പോയിന്റ്', cards: 'ഡെക്കിലെ കാർഡുകൾ', card: 'ഡെക്കിലെ കാർഡ്', family: 'കുടുംബാംഗങ്ങൾ', groups: 'ഗ്രൂപ്പുകൾ', openChats: 'ചാറ്റുകൾ തുറക്കുക', editProfile: 'പ്രൊഫൈൽ എഡിറ്റ്', about: 'വിവരങ്ങൾ', userId: 'യൂസർ ഐഡി', name: 'പേര്', nick: 'വിളിപ്പേര്', visibility: 'ദൃശ്യത', gender: 'ലിംഗം', born: 'ജനനം', status: 'നില', location: 'സ്ഥലം', living: 'ജീവിച്ചിരിക്കുന്നു', passed: 'മരണമടഞ്ഞു', photos: 'ഫോട്ടോകളും വീഡിയോകളും', news: 'വാർത്താ കോർണർ', scrap: 'സ്ക്രാപ്പ് ഭിത്തി', soon: 'ഉടൻ വരുന്നു', hidden: 'മറച്ചിരിക്കുന്നു', language: 'ഭാഷ', member: 'ക്ലാൻഡെക്ക് അംഗം', added: 'ബന്ധുവോ സുഹൃത്തോ ചേർത്തത്', publicNote: 'കാർഡുകളും പോയിന്റും എല്ലാവർക്കും കാണാം' },
+  hi: { points: 'पॉइंट', cards: 'डेक में कार्ड', card: 'डेक में कार्ड', family: 'परिवार के सदस्य', groups: 'ग्रुप', openChats: 'चैट खोलें', editProfile: 'प्रोफ़ाइल बदलें', about: 'परिचय', userId: 'यूज़र आईडी', name: 'नाम', nick: 'उपनाम', visibility: 'दृश्यता', gender: 'लिंग', born: 'जन्म', status: 'स्थिति', location: 'स्थान', living: 'जीवित', passed: 'स्वर्गवासी', photos: 'फ़ोटो और वीडियो', news: 'समाचार कोना', scrap: 'स्क्रैप वॉल', soon: 'जल्द आ रहा है', hidden: 'छिपा हुआ', language: 'भाषा', member: 'क्लैनडेक सदस्य', added: 'रिश्तेदार या दोस्त ने जोड़ा', publicNote: 'कार्ड और पॉइंट सभी देख सकते हैं' },
+};
+function useLang() {
+  const [lang, setLangState] = useState(() => { try { const v = localStorage.getItem('clandeck_lang'); return STR[v] ? v : 'en'; } catch { return 'en'; } });
+  const setLang = (v) => { setLangState(v); try { localStorage.setItem('clandeck_lang', v); } catch { /* ignore */ } };
+  return [lang, setLang, STR[lang]];
+}
+
 // ================= CARDS IN DECK + POINTS (public: everyone can see anyone's cards and points) =================
-function PointsBox({ profileId, mine = false }) {
+function usePoints(profileId) {
   const [d, setD] = useState(null);
   useEffect(() => {
     if (!profileId) return undefined;
@@ -848,23 +862,9 @@ function PointsBox({ profileId, mine = false }) {
     const t = setInterval(load, 60000);
     return () => { dead = true; clearInterval(t); };
   }, [profileId]);
-  const fmt = (n) => (Math.round(Number(n || 0) * 100) / 100).toFixed(2).replace(/\.?0+$/, (m) => (m === '.00' ? '' : m));
-  const tile = (value, label, bg) => (
-    <div style={{flex:1, minWidth:0, background:bg, borderRadius:'12px', padding:'10px 6px'}}>
-      <div style={{fontSize:'22px', fontWeight:700, lineHeight:'26px'}}>{d ? value : '–'}</div>
-      <div style={{fontSize:'10px', letterSpacing:'1px', color:'#6b6358', fontWeight:600, marginTop:2}}>{label}</div>
-    </div>
-  );
-  return (
-    <div style={{marginTop:'14px'}}>
-      <div style={{display:'flex', gap:'8px'}}>
-        {tile(d ? d.cards : 0, d && d.cards === 1 ? 'CARD IN DECK' : 'CARDS IN DECK', '#f3ead8')}
-        {tile(d ? fmt(d.points) : 0, 'POINTS', '#fdebc4')}
-      </div>
-      <p style={{fontSize:'10px', color:'#aaa', margin:'8px 0 0', lineHeight:'14px'}}>{mine ? 'Every person who accepts your request is a card in your deck. Everyone can see your points.' : 'Cards in deck and points are public.'}</p>
-    </div>
-  );
+  return d;
 }
+const fmtPoints = (n) => { const v = Math.round(Number(n || 0) * 100) / 100; return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, ''); };
 
 function NoticeBar({ notes, busyId, onAnswer, onOpen }) {
   if (!notes.length) return null;
@@ -1030,6 +1030,17 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
     nickname: localStorage.getItem('profile_nickname') || '',
     visibility: String(localStorage.getItem('profile_visibility') || 'public').toLowerCase()
   });
+  const [lang, setLang, T] = useLang();
+  const selfId = storedUser?.id || storedUser?.uname || '';
+  const pts = usePoints(viewing ? viewing.id : selfId);
+  const [selfInfo, setSelfInfo] = useState(null);            // my own public details (bio, born, place)
+  useEffect(() => {
+    if (!selfId) return undefined;
+    let dead = false;
+    fetch(`${API_URL}/api/profiles/public/${encodeURIComponent(selfId)}?home_id=${encodeURIComponent(selfId)}`)
+      .then((r) => r.json()).then((j) => { if (!dead && j && j.success) setSelfInfo(j.data); }).catch(() => {});
+    return () => { dead = true; };
+  }, [selfId]);
 
   const loadGroups = useCallback(async () => {
     try {
@@ -1165,6 +1176,11 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         .deck-grid > * { min-width: 0; }
         .deck-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 16px; width: 100%; padding: 16px 20px; box-sizing: border-box; }
         .card { background: #fffefb; border: 1px solid #e9e2d6; border-radius: 14px; padding: 18px; }
+        .deck-hero .hero-text, .deck-hero .hero-btns { padding-top: 52px; }
+        @media(max-width: 700px){
+          .deck-hero .hero-text, .deck-hero .hero-btns { padding-top: 0 !important; flex: 1 1 100% !important; }
+          .deck-hero .lang-btn { padding: 0 9px !important; font-size: 11px !important; height: 28px !important; }
+        }
         @media(max-width: 1100px){ .deck-grid { grid-template-columns: 260px minmax(0, 1fr); } }
         @media(max-width: 700px){ .deck-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } .deck-grid .ad-square { margin-left: auto; margin-right: auto; } }
       `}</style>
@@ -1199,71 +1215,84 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         </div>
       )}
 
-      <div className="deck-grid">
-        <div>
-          {viewing ? (
-            <div className="card" style={{textAlign:'center'}}>
-              <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
-                {(viewInfo && viewInfo.photo_url) || viewing.photo_url ? <img src={(viewInfo && viewInfo.photo_url) || viewing.photo_url} alt={viewing.display_name} style={{width:'100%', height:'100%', objectFit:'cover'}} /> : (viewing.display_name || '?')[0].toUpperCase()}
+      {(() => {
+        const info = viewing ? viewInfo : selfInfo;
+        const shownName = viewing ? viewing.display_name : (isPublic ? getName() : T.hidden);
+        const nick = viewing ? viewing.nickname : (isPublic ? profileInfo.nickname : '');
+        const photo = viewing ? ((viewInfo && viewInfo.photo_url) || viewing.photo_url) : photoUrl;
+        const sub = viewing ? (viewInfo && viewInfo.uname ? `@${viewInfo.uname}` : (viewing.is_claimed ? T.member : T.added)) : (privacy.showUsername !== false ? `@${storedUser?.uname || 'user'}` : '');
+        const place = info && info.location ? info.location : '';
+        const pill = (v, label, bg) => (
+          <span key={label} style={{background:bg, borderRadius:'999px', padding:'6px 14px', fontSize:'12px', fontWeight:600, whiteSpace:'nowrap'}}><b style={{fontSize:'14px'}}>{v}</b> <span style={{color:'#6b6358', letterSpacing:'.5px', fontSize:'10px'}}>{label}</span></span>
+        );
+        return (
+          <section className="deck-hero" style={{margin:'12px 20px 0', background:'#fffefb', border:'1px solid #e9e2d6', borderRadius:'18px', overflow:'hidden', position:'relative'}}>
+            <div style={{height:'96px', background:'#eadcc0'}} />
+            <div role="group" aria-label={T.language} style={{position:'absolute', top:'12px', right:'12px', display:'flex', background:'#fff', borderRadius:'999px', padding:'3px', gap:'2px', boxShadow:'0 2px 8px rgba(31,26,20,0.12)'}}>
+              {LANGS.map(([code, label]) => (
+                <button key={code} className="lang-btn" type="button" onClick={() => setLang(code)} aria-pressed={lang === code} style={{height:'32px', padding:'0 12px', borderRadius:'999px', border:'none', cursor:'pointer', background: lang === code ? '#1f1a14' : 'transparent', color: lang === code ? '#fff' : '#1f1a14', fontWeight:700, fontSize:'12px', fontFamily:'inherit'}}>{label}</button>
+              ))}
+            </div>
+            <div style={{padding:'0 20px 18px', display:'flex', flexWrap:'wrap', gap:'16px', alignItems:'flex-end', marginTop:'-48px'}}>
+              <div style={{width:'112px', height:'112px', background:'#c9ad83', color:'white', borderRadius:'22px', border:'4px solid #fff', boxSizing:'border-box', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'42px', fontWeight:600, overflow:'hidden', flexShrink:0}}>
+                {photo
+                  ? (viewing
+                    ? <img src={photo} alt={shownName} style={{width:'100%', height:'100%', objectFit:'cover'}} />
+                    : <img src={photo} alt="profile" style={{width:'100%', height:'100%', objectFit:'cover', objectPosition:`${pos.x}% ${pos.y}%`, transform:`scale(${pos.zoom/100})`}} onError={() => setPhotoUrl('')} />)
+                  : (shownName || '?')[0].toUpperCase()}
               </div>
-              <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px', wordBreak:'break-word'}}>{viewing.display_name}{viewing.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({viewing.nickname})</span>}</h2>
-              <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>{viewInfo && viewInfo.uname ? `@${viewInfo.uname}` : (viewing.is_claimed ? 'Member of ClanDeck' : 'Added by a relative or friend')}</p>
-              {viewInfo && !viewInfo.error && (
-                <div style={{marginTop:'14px', textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
-                  {[
-                    ['GENDER', viewInfo.gender],
-                    ['BORN', fmtDate(viewInfo.dob)],
-                    ['STATUS', viewInfo.is_alive ? 'Living' : (viewInfo.dod ? `Passed away ${fmtDate(viewInfo.dod)}` : 'Passed away')],
-                    ['LOCATION', viewInfo.location],
-                  ].filter(([, v]) => v).map(([k, v]) => (
-                    <div key={k} style={{display:'flex', justifyContent:'space-between', gap:8, marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>{k}</span><span style={{fontWeight: 500, textAlign:'right', wordBreak:'break-word'}}>{v}</span></div>
-                  ))}
+              <div className="hero-text" style={{flex:'1 1 260px', minWidth:0}}>
+                <h1 style={{margin:0, fontWeight:600, fontSize:'22px', lineHeight:'28px', wordBreak:'break-word'}}>{shownName}{nick && <span style={{fontWeight:400, fontSize:'13px', color:'#888'}}> ({nick})</span>}</h1>
+                <p style={{margin:'2px 0 10px', fontSize:'12px', color:'#888', fontWeight:500}}>{[sub, place].filter(Boolean).join('  ·  ')}</p>
+                <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
+                  {pill(pts ? fmtPoints(pts.points) : '–', T.points, '#fdebc4')}
+                  {pill(pts ? pts.cards : '–', pts && pts.cards === 1 ? T.card : T.cards, '#fdebc4')}
+                  {!viewing && pill(visibleFamily.length + 1, T.family, '#f3ead8')}
+                  {!viewing && pill(groups.length, T.groups, '#f3ead8')}
+                </div>
+              </div>
+              {!viewing && (
+                <div className="hero-btns" style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
+                  <button type="button" onClick={onGoProfile} style={{height:'40px', padding:'0 18px', borderRadius:'20px', border:'2px solid #111', background:'#fff', color:'#111', fontWeight:600, fontSize:'12px', cursor:'pointer', fontFamily:'inherit'}}>{T.editProfile}</button>
+                  <button type="button" onClick={() => setShowChat(true)} style={{height:'40px', padding:'0 18px', borderRadius:'20px', border:'2px solid #0f6b63', background:'#0f6b63', color:'#fff', fontWeight:600, fontSize:'12px', cursor:'pointer', fontFamily:'inherit'}}>{T.openChats}</button>
                 </div>
               )}
-              {viewInfo && viewInfo.error && <p style={{fontSize:'12px', color:'#b3261e', marginTop:10}}>{viewInfo.error}</p>}
-              <PointsBox profileId={viewing.id} />
             </div>
-          ) : (
-          <div className="card" style={{textAlign:'center'}}>
-            <div style={{width:'144px', height:'144px', background:'#c9ad83', color:'white', borderRadius:'18px', margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'52px', fontWeight: 600, overflow:'hidden'}}>
-              {photoUrl ? <img src={photoUrl} alt="profile" style={{width:'100%', height:'100%', objectFit:'cover', objectPosition: `${pos.x}% ${pos.y}%`, transform: `scale(${pos.zoom/100})`}} onError={()=>setPhotoUrl('')} /> : getName()[0]?.toUpperCase()}
-            </div>
-            <h2 style={{fontWeight: 600, fontSize:'16px', marginTop:'12px'}}>
-              {isPublic ? getName() : 'Hidden'}
-              {isPublic && profileInfo.nickname && <span style={{fontWeight:400, fontSize:'12px', color:'#888'}}> ({profileInfo.nickname})</span>}
-            </h2>
-            {privacy.showUsername!==false && <p style={{fontSize:'11px', color:'#888', fontWeight: 500}}>@{storedUser?.uname || 'user'}{isPublic && profileInfo.nickname ? ` • ${profileInfo.nickname}` : ''}</p>}
+          </section>
+        );
+      })()}
 
-            <div style={{marginTop:'14px', textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>USER ID</span><span style={{fontWeight: 500, fontSize:'10px'}}>{(storedUser?.id || 'self').slice(0,22)}</span></div>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>NAME</span><span style={{fontWeight: 500}}>{isPublic ? getName() : 'Hidden'}</span></div>
-              {profileInfo.nickname && <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>NICK NAME</span><span style={{fontWeight: 500}}>{isPublic ? profileInfo.nickname : 'Hidden'}</span></div>}
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'6px'}}><span style={{color:'#888', fontWeight: 500}}>VISIBILITY</span><span style={{fontWeight: 500, color: profileInfo.visibility==='public' ? 'green' : 'red'}}>{profileInfo.visibility?.toUpperCase()}</span></div>
+      <div className="deck-grid">
+        <div>
+          <div className="card">
+            <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:8}}>{T.about}{viewing ? ` ${viewing.display_name.split(' ')[0].toUpperCase()}` : ''}</div>
+            {(viewing ? viewInfo : selfInfo) && (viewing ? viewInfo : selfInfo).bio && <p style={{margin:'0 0 10px', fontSize:'13px', lineHeight:'19px', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{(viewing ? viewInfo : selfInfo).bio}</p>}
+            <div style={{textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
+              {(viewing ? [
+                [T.gender, viewInfo && viewInfo.gender],
+                [T.born, viewInfo && fmtDate(viewInfo.dob)],
+                [T.status, viewInfo && !viewInfo.error ? (viewInfo.is_alive ? T.living : (viewInfo.dod ? `${T.passed} ${fmtDate(viewInfo.dod)}` : T.passed)) : ''],
+                [T.location, viewInfo && viewInfo.location],
+              ] : [
+                [T.userId, (storedUser?.id || 'self').slice(0, 22)],
+                [T.name, isPublic ? getName() : T.hidden],
+                [T.nick, profileInfo.nickname ? (isPublic ? profileInfo.nickname : T.hidden) : ''],
+                [T.born, selfInfo && fmtDate(selfInfo.dob)],
+                [T.location, selfInfo && selfInfo.location],
+                [T.visibility, (profileInfo.visibility || '').toUpperCase()],
+              ]).filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} style={{display:'flex', justifyContent:'space-between', gap:8, marginBottom:'6px'}}><span style={{color:'#888', fontWeight:500}}>{k}</span><span style={{fontWeight:500, textAlign:'right', wordBreak:'break-word', color: k === T.visibility ? (profileInfo.visibility === 'public' ? 'green' : 'red') : undefined}}>{v}</span></div>
+              ))}
             </div>
-
-            <PointsBox profileId={storedUser?.id || storedUser?.uname} mine />
+            {viewing && viewInfo && viewInfo.error && <p style={{fontSize:'12px', color:'#b3261e', marginTop:10}}>{viewInfo.error}</p>}
+            <p style={{fontSize:'10px', color:'#aaa', margin:'10px 0 0', lineHeight:'14px'}}>{T.publicNote}</p>
           </div>
-          )}
         </div>
 
         <div style={{minWidth:0}}>
           <div style={{marginBottom:'12px'}}><AdSlot kind="banner" /></div>
           {viewing ? (
             <>
-            {viewInfo && viewInfo.bio && (
-              <div className="card" style={{marginBottom:'12px'}}>
-                <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:6}}>ABOUT {viewing.display_name.split(' ')[0].toUpperCase()}</div>
-                <p style={{margin:0, fontSize:'13px', lineHeight:'19px', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{viewInfo.bio}</p>
-              </div>
-            )}
-            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'12px', marginBottom:'12px'}}>
-              {[['🖼 GALLERY', 'Photos and videos will appear here.'], ['📝 WALL', 'Scraps and posts will appear here.']].map(([t, d]) => (
-                <div key={t} className="card" style={{minWidth:0}}>
-                  <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:6}}>{t}</div>
-                  <p style={{margin:0, fontSize:'12px', color:'#aaa'}}>{d} <i>(coming soon)</i></p>
-                </div>
-              ))}
-            </div>
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.inMyTree ? `Your line to ${viewing.display_name}` : `${viewing.display_name.split(' ')[0]}'s Family Tree`}</div>
               {viewing.inMyTree
@@ -1280,6 +1309,14 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
               <FamilyTree userId={storedUser?.id || storedUser?.uname} openReq={openReq} onViewProfile={(p, way) => { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); }} />
             </div>
           ) : <div className="card" style={{textAlign:'center', padding:'40px'}}><p style={{color:'#aaa', fontSize:'13px'}}>Family Tree is hidden</p></div>}
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:'12px', marginTop:'12px'}}>
+            {[T.photos, T.news, T.scrap].map((t) => (
+              <div key={t} className="card" style={{minWidth:0}}>
+                <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:6}}>{t}</div>
+                <p style={{margin:0, fontSize:'12px', color:'#aaa'}}><i>({T.soon})</i></p>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div>
