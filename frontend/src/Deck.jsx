@@ -1228,11 +1228,6 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         return (
           <section className="deck-hero" style={{margin:'12px 20px 0', background:'#fffefb', border:'1px solid #e9e2d6', borderRadius:'18px', overflow:'hidden', position:'relative'}}>
             <div style={{height:'96px', background:'#eadcc0'}} />
-            <div role="group" aria-label={T.language} style={{position:'absolute', top:'12px', right:'12px', display:'flex', background:'#fff', borderRadius:'999px', padding:'3px', gap:'2px', boxShadow:'0 2px 8px rgba(31,26,20,0.12)'}}>
-              {LANGS.map(([code, label]) => (
-                <button key={code} className="lang-btn" type="button" onClick={() => setLang(code)} aria-pressed={lang === code} style={{height:'32px', padding:'0 12px', borderRadius:'999px', border:'none', cursor:'pointer', background: lang === code ? '#1f1a14' : 'transparent', color: lang === code ? '#fff' : '#1f1a14', fontWeight:700, fontSize:'12px', fontFamily:'inherit'}}>{label}</button>
-              ))}
-            </div>
             <div style={{padding:'0 20px 18px', display:'flex', flexWrap:'wrap', gap:'16px', alignItems:'flex-end', marginTop:'-48px'}}>
               <div style={{width:'112px', height:'112px', background:'#c9ad83', color:'white', borderRadius:'22px', border:'4px solid #fff', boxSizing:'border-box', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'42px', fontWeight:600, overflow:'hidden', flexShrink:0}}>
                 {photo
@@ -1251,12 +1246,13 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
                   {!viewing && pill(groups.length, T.groups, '#f3ead8')}
                 </div>
               </div>
-              {!viewing && (
-                <div className="hero-btns" style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
-                  <button type="button" onClick={onGoProfile} style={{height:'40px', padding:'0 18px', borderRadius:'20px', border:'2px solid #111', background:'#fff', color:'#111', fontWeight:600, fontSize:'12px', cursor:'pointer', fontFamily:'inherit'}}>{T.editProfile}</button>
-                  <button type="button" onClick={() => setShowChat(true)} style={{height:'40px', padding:'0 18px', borderRadius:'20px', border:'2px solid #0f6b63', background:'#0f6b63', color:'#fff', fontWeight:600, fontSize:'12px', cursor:'pointer', fontFamily:'inherit'}}>{T.openChats}</button>
+              <div className="hero-btns" style={{display:'flex', alignItems:'center'}}>
+                <div role="group" aria-label={T.language} style={{display:'flex', background:'#f3ead8', borderRadius:'999px', padding:'3px', gap:'2px'}}>
+                  {LANGS.map(([code, label]) => (
+                    <button key={code} className="lang-btn" type="button" onClick={() => setLang(code)} aria-pressed={lang === code} style={{height:'34px', padding:'0 14px', borderRadius:'999px', border:'none', cursor:'pointer', background: lang === code ? '#1f1a14' : 'transparent', color: lang === code ? '#fff' : '#1f1a14', fontWeight:700, fontSize:'12px', fontFamily:'inherit'}}>{label}</button>
+                  ))}
                 </div>
-              )}
+              </div>
             </div>
           </section>
         );
