@@ -840,9 +840,9 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
 // Covers the words on this page. Other pages follow later. Malayalam and Hindi wording is a first draft for a native speaker to check.
 const LANGS = [['en', 'English'], ['ml', 'മലയാളം'], ['hi', 'हिन्दी']];
 const STR = {
-  en: { points: 'POINTS', cards: 'CARDS IN DECK', card: 'CARD IN DECK', family: 'FAMILY MEMBERS', groups: 'GROUPS', openChats: 'Open chats', editProfile: 'Edit profile', about: 'ABOUT', userId: 'USER ID', name: 'NAME', nick: 'NICK NAME', visibility: 'VISIBILITY', gender: 'GENDER', born: 'BORN', status: 'STATUS', location: 'LOCATION', living: 'Living', passed: 'Passed away', photos: 'Photos and videos', news: 'News corner', scrap: 'Scrap wall', soon: 'coming soon', hidden: 'Hidden', language: 'Language', member: 'Member of ClanDeck', added: 'Added by a relative or friend', publicNote: 'Everyone can see cards and points' },
-  ml: { points: 'പോയിന്റ്', cards: 'ഡെക്കിലെ കാർഡുകൾ', card: 'ഡെക്കിലെ കാർഡ്', family: 'കുടുംബാംഗങ്ങൾ', groups: 'ഗ്രൂപ്പുകൾ', openChats: 'ചാറ്റുകൾ തുറക്കുക', editProfile: 'പ്രൊഫൈൽ എഡിറ്റ്', about: 'വിവരങ്ങൾ', userId: 'യൂസർ ഐഡി', name: 'പേര്', nick: 'വിളിപ്പേര്', visibility: 'ദൃശ്യത', gender: 'ലിംഗം', born: 'ജനനം', status: 'നില', location: 'സ്ഥലം', living: 'ജീവിച്ചിരിക്കുന്നു', passed: 'മരണമടഞ്ഞു', photos: 'ഫോട്ടോകളും വീഡിയോകളും', news: 'വാർത്താ കോർണർ', scrap: 'സ്ക്രാപ്പ് ഭിത്തി', soon: 'ഉടൻ വരുന്നു', hidden: 'മറച്ചിരിക്കുന്നു', language: 'ഭാഷ', member: 'ക്ലാൻഡെക്ക് അംഗം', added: 'ബന്ധുവോ സുഹൃത്തോ ചേർത്തത്', publicNote: 'കാർഡുകളും പോയിന്റും എല്ലാവർക്കും കാണാം' },
-  hi: { points: 'पॉइंट', cards: 'डेक में कार्ड', card: 'डेक में कार्ड', family: 'परिवार के सदस्य', groups: 'ग्रुप', openChats: 'चैट खोलें', editProfile: 'प्रोफ़ाइल बदलें', about: 'परिचय', userId: 'यूज़र आईडी', name: 'नाम', nick: 'उपनाम', visibility: 'दृश्यता', gender: 'लिंग', born: 'जन्म', status: 'स्थिति', location: 'स्थान', living: 'जीवित', passed: 'स्वर्गवासी', photos: 'फ़ोटो और वीडियो', news: 'समाचार कोना', scrap: 'स्क्रैप वॉल', soon: 'जल्द आ रहा है', hidden: 'छिपा हुआ', language: 'भाषा', member: 'क्लैनडेक सदस्य', added: 'रिश्तेदार या दोस्त ने जोड़ा', publicNote: 'कार्ड और पॉइंट सभी देख सकते हैं' },
+  en: { newsCredit: 'Headlines from', newsOpen: 'Tap a headline to read it on the publisher\'s site.', newsLoading: 'Loading headlines…', newsDown: 'News is not available right now.', newsOld: 'Showing the last headlines we got.', edit: 'Edit', save: 'Save', cancel: 'Cancel', saving: 'Saving…', changePhoto: 'Change photo', waiting: 'Waiting for you', nothing: 'Nothing is waiting for you right now', waitingN: 'waiting for you', myGroups: 'My groups', newsT: 'News corner', bio: 'BIO', noBio: 'Add a few lines about yourself', male: 'Male', female: 'Female', pub: 'Public', priv: 'Private', saveFail: 'Could not save', points: 'POINTS', cards: 'CARDS IN DECK', card: 'CARD IN DECK', family: 'FAMILY MEMBERS', groups: 'GROUPS', openChats: 'Open chats', editProfile: 'Edit profile', about: 'ABOUT', userId: 'USER ID', name: 'NAME', nick: 'NICK NAME', visibility: 'VISIBILITY', gender: 'GENDER', born: 'BORN', status: 'STATUS', location: 'LOCATION', living: 'Living', passed: 'Passed away', photos: 'Photos and videos', news: 'News corner', scrap: 'Scrap wall', soon: 'coming soon', hidden: 'Hidden', language: 'Language', member: 'Member of ClanDeck', added: 'Added by a relative or friend', publicNote: 'Everyone can see cards and points' },
+  ml: { newsCredit: 'തലക്കെട്ടുകൾ:', newsOpen: 'പ്രസാധകരുടെ സൈറ്റിൽ വായിക്കാൻ തലക്കെട്ടിൽ തൊടുക.', newsLoading: 'തലക്കെട്ടുകൾ ലോഡ് ചെയ്യുന്നു…', newsDown: 'ഇപ്പോൾ വാർത്ത ലഭ്യമല്ല.', newsOld: 'അവസാനം ലഭിച്ച തലക്കെട്ടുകൾ കാണിക്കുന്നു.', edit: 'തിരുത്തുക', save: 'സേവ്', cancel: 'റദ്ദാക്കുക', saving: 'സേവ് ചെയ്യുന്നു…', changePhoto: 'ഫോട്ടോ മാറ്റുക', waiting: 'നിങ്ങളെ കാത്തിരിക്കുന്നത്', nothing: 'ഇപ്പോൾ ഒന്നും കാത്തിരിക്കുന്നില്ല', waitingN: 'നിങ്ങളെ കാത്തിരിക്കുന്നു', myGroups: 'എന്റെ ഗ്രൂപ്പുകൾ', newsT: 'വാർത്താ കോർണർ', bio: 'ചെറുവിവരണം', noBio: 'നിങ്ങളെക്കുറിച്ച് ചില വരികൾ ചേർക്കുക', male: 'പുരുഷൻ', female: 'സ്ത്രീ', pub: 'പൊതു', priv: 'സ്വകാര്യം', saveFail: 'സേവ് ചെയ്യാനായില്ല', points: 'പോയിന്റ്', cards: 'ഡെക്കിലെ കാർഡുകൾ', card: 'ഡെക്കിലെ കാർഡ്', family: 'കുടുംബാംഗങ്ങൾ', groups: 'ഗ്രൂപ്പുകൾ', openChats: 'ചാറ്റുകൾ തുറക്കുക', editProfile: 'പ്രൊഫൈൽ എഡിറ്റ്', about: 'വിവരങ്ങൾ', userId: 'യൂസർ ഐഡി', name: 'പേര്', nick: 'വിളിപ്പേര്', visibility: 'ദൃശ്യത', gender: 'ലിംഗം', born: 'ജനനം', status: 'നില', location: 'സ്ഥലം', living: 'ജീവിച്ചിരിക്കുന്നു', passed: 'മരണമടഞ്ഞു', photos: 'ഫോട്ടോകളും വീഡിയോകളും', news: 'വാർത്താ കോർണർ', scrap: 'സ്ക്രാപ്പ് ഭിത്തി', soon: 'ഉടൻ വരുന്നു', hidden: 'മറച്ചിരിക്കുന്നു', language: 'ഭാഷ', member: 'ക്ലാൻഡെക്ക് അംഗം', added: 'ബന്ധുവോ സുഹൃത്തോ ചേർത്തത്', publicNote: 'കാർഡുകളും പോയിന്റും എല്ലാവർക്കും കാണാം' },
+  hi: { newsCredit: 'सुर्खियाँ:', newsOpen: 'प्रकाशक की साइट पर पढ़ने के लिए सुर्खी पर टैप करें।', newsLoading: 'सुर्खियाँ लोड हो रही हैं…', newsDown: 'अभी समाचार उपलब्ध नहीं है।', newsOld: 'पिछली मिली सुर्खियाँ दिखा रहे हैं।', edit: 'बदलें', save: 'सहेजें', cancel: 'रद्द करें', saving: 'सहेज रहे हैं…', changePhoto: 'फ़ोटो बदलें', waiting: 'आपका इंतज़ार', nothing: 'अभी आपका कुछ इंतज़ार नहीं कर रहा', waitingN: 'आपका इंतज़ार कर रहे हैं', myGroups: 'मेरे ग्रुप', newsT: 'समाचार कोना', bio: 'संक्षिप्त परिचय', noBio: 'अपने बारे में कुछ पंक्तियाँ जोड़ें', male: 'पुरुष', female: 'महिला', pub: 'सार्वजनिक', priv: 'निजी', saveFail: 'सहेज नहीं सके', points: 'पॉइंट', cards: 'डेक में कार्ड', card: 'डेक में कार्ड', family: 'परिवार के सदस्य', groups: 'ग्रुप', openChats: 'चैट खोलें', editProfile: 'प्रोफ़ाइल बदलें', about: 'परिचय', userId: 'यूज़र आईडी', name: 'नाम', nick: 'उपनाम', visibility: 'दृश्यता', gender: 'लिंग', born: 'जन्म', status: 'स्थिति', location: 'स्थान', living: 'जीवित', passed: 'स्वर्गवासी', photos: 'फ़ोटो और वीडियो', news: 'समाचार कोना', scrap: 'स्क्रैप वॉल', soon: 'जल्द आ रहा है', hidden: 'छिपा हुआ', language: 'भाषा', member: 'क्लैनडेक सदस्य', added: 'रिश्तेदार या दोस्त ने जोड़ा', publicNote: 'कार्ड और पॉइंट सभी देख सकते हैं' },
 };
 function useLang() {
   const [lang, setLangState] = useState(() => { try { const v = localStorage.getItem('clandeck_lang'); return STR[v] ? v : 'en'; } catch { return 'en'; } });
@@ -866,8 +866,52 @@ function usePoints(profileId) {
 }
 const fmtPoints = (n) => { const v = Math.round(Number(n || 0) * 100) / 100; return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, ''); };
 
-function NoticeBar({ notes, busyId, onAnswer, onOpen }) {
-  if (!notes.length) return null;
+// ================= EDIT IN PLACE (own profile only: a pen next to each field) =================
+const PenIcon = ({ size = 14 }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+);
+function EditableRow({ label, display, value, type = 'text', options, multiline, canEdit, onSave, T }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const start = () => { setDraft(value == null ? '' : String(value)); setErr(''); setEditing(true); };
+  const save = async () => {
+    setBusy(true); setErr('');
+    try { await onSave(draft); setEditing(false); } catch (e) { setErr(`${T.saveFail}: ${e.message || ''}`); }
+    setBusy(false);
+  };
+  const field = { width: '100%', boxSizing: 'border-box', padding: '7px 9px', border: '1px solid #d8c5a3', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', background: '#fff' };
+  const pen = canEdit && !editing && (
+    <button type="button" onClick={start} aria-label={`${T.edit}: ${label}`} title={T.edit} style={{ border: 'none', background: 'transparent', color: '#8a7a5c', cursor: 'pointer', padding: 6, margin: '-6px -4px -6px 0', minWidth: 28, minHeight: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><PenIcon /></button>
+  );
+  if (!canEdit && !display) return null;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: '#888', fontWeight: 500, fontSize: 11 }}>{label}</span>
+        {!editing && !multiline && <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}><span style={{ fontWeight: 500, textAlign: 'right', wordBreak: 'break-word', fontSize: 11 }}>{display || <i style={{ color: '#bbb' }}>–</i>}</span>{pen}</span>}
+        {!editing && multiline && pen}
+      </div>
+      {!editing && multiline && <p style={{ margin: '4px 0 0', fontSize: 13, lineHeight: '19px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{display || <i style={{ color: '#bbb' }}>{T.noBio}</i>}</p>}
+      {editing && (
+        <div style={{ marginTop: 6 }}>
+          {multiline ? <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={4} maxLength={1000} style={{ ...field, resize: 'vertical' }} autoFocus />
+            : options ? <select value={draft} onChange={(e) => setDraft(e.target.value)} style={field} autoFocus>{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            : <input type={type} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }} style={field} autoFocus />}
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button type="button" disabled={busy} onClick={save} style={{ padding: '7px 16px', borderRadius: 20, border: 'none', background: '#111', color: '#fff', fontWeight: 600, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{busy ? T.saving : T.save}</button>
+            <button type="button" disabled={busy} onClick={() => setEditing(false)} style={{ padding: '7px 16px', borderRadius: 20, border: '1px solid #d8c5a3', background: '#fff', color: '#111', fontWeight: 600, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{T.cancel}</button>
+          </div>
+          {err && <p style={{ margin: '6px 0 0', fontSize: 11, color: '#b3261e' }}>{err}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// the "Waiting for you" card: people who want to chat, join a group or be added as family
+function WaitingCard({ notes, busyId, onAnswer, onOpen, T }) {
   const text = (n) => {
     const who = n.from ? n.from.display_name : 'Someone';
     if (n.kind === 'chat_request') return <><b>{who}</b> wants to chat with you</>;
@@ -875,25 +919,97 @@ function NoticeBar({ notes, busyId, onAnswer, onOpen }) {
     if (n.kind === 'family_add') return <><b>{who}</b> added you as {n.message ? <>{n.message}'s </> : 'their '}<b>{n.relation_type || 'relative'}</b></>;
     return <>{n.message}</>;
   };
-  const btn = (bg, fg) => ({ padding: '7px 14px', borderRadius: 20, border: bg === '#fff' ? '1px solid #d8c5a3' : 'none', background: bg, color: fg, fontWeight: 600, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' });
+  const btn = (bg, fg) => ({ flex: 1, minHeight: 36, padding: '7px 12px', borderRadius: 20, border: bg === '#fff' ? '1px solid #d8c5a3' : 'none', background: bg, color: fg, fontWeight: 600, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' });
   return (
-    <div style={{ margin: '12px 20px 0', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-      {notes.map((n) => (
-        <div key={n.id} style={{ padding: '10px 14px', background: n.kind === 'info' ? '#f3f7f1' : '#fff8e1', border: `1px solid ${n.kind === 'info' ? '#cfe3c8' : '#f1dc9a'}`, borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13, minWidth: 0 }}>
-          <span style={{ fontSize: 16 }}>{n.kind === 'info' ? 'ℹ️' : '🔔'}</span>
-          <span style={{ flex: 1, minWidth: 180, wordBreak: 'break-word' }}>{text(n)}</span>
-          {n.from && n.kind !== 'info' && <button type="button" onClick={() => onOpen(n.from)} style={btn('#fff', '#1a1a1a')}>View profile</button>}
-          {n.kind === 'info'
-            ? <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'dismiss')} style={btn('#111', '#fff')}>OK</button>
-            : <>
-                <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'accept')} style={btn('#111', '#fff')}>Accept</button>
-                <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'reject')} style={btn('#fff', '#b3261e')}>Reject</button>
-              </>}
-        </div>
-      ))}
+    <div id="waiting-card" className="card" style={{ padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>{T.waiting}</span>
+        {notes.length > 0 && <span style={{ background: '#b3261e', color: '#fff', borderRadius: 999, minWidth: 20, height: 20, fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{notes.length}</span>}
+      </div>
+      {!notes.length && <p style={{ margin: 0, fontSize: 12, color: '#aaa' }}>{T.nothing}</p>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {notes.map((n) => (
+          <div key={n.id} style={{ padding: '10px 12px', background: n.kind === 'info' ? '#f3f7f1' : '#fff8e1', border: `1px solid ${n.kind === 'info' ? '#cfe3c8' : '#f1dc9a'}`, borderRadius: 12, fontSize: 12, minWidth: 0 }}>
+            <div style={{ wordBreak: 'break-word', marginBottom: 8 }}>{n.kind === 'info' ? 'ℹ️ ' : '🔔 '}{text(n)}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {n.from && n.kind !== 'info' && <button type="button" onClick={() => onOpen(n.from)} style={btn('#fff', '#1a1a1a')}>View profile</button>}
+              {n.kind === 'info'
+                ? <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'dismiss')} style={btn('#111', '#fff')}>OK</button>
+                : <>
+                    <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'accept')} style={btn('#111', '#fff')}>Accept</button>
+                    <button type="button" disabled={busyId === n.id} onClick={() => onAnswer(n, 'reject')} style={btn('#fff', '#b3261e')}>Reject</button>
+                  </>}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
+
+// ================= NEWS CORNER: headlines from official feeds, read on the publisher's own site =================
+function NewsCorner({ T }) {
+  const [sources, setSources] = useState([]);
+  const [sel, setSel] = useState(() => { try { return localStorage.getItem('clandeck_news_source') || ''; } catch { return ''; } });
+  const [state, setState] = useState({ loading: true, items: [], error: '', stale: false, name: '' });
+  useEffect(() => {
+    let dead = false;
+    fetch(`${API_URL}/api/news/sources`).then((r) => r.json()).then((j) => { if (!dead && j.success) setSources(j.data); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  useEffect(() => {
+    let dead = false;
+    setState((s) => ({ ...s, loading: true, error: '' }));
+    fetch(`${API_URL}/api/news?source=${encodeURIComponent(sel)}&limit=5`).then((r) => r.json()).then((j) => {
+      if (dead) return;
+      if (j.success) setState({ loading: false, items: j.data || [], error: '', stale: !!j.stale, name: j.source ? j.source.name : '' });
+      else setState({ loading: false, items: [], error: j.error || T.newsDown, stale: false, name: j.source ? j.source.name : '' });
+    }).catch(() => { if (!dead) setState({ loading: false, items: [], error: T.newsDown, stale: false, name: '' }); });
+    return () => { dead = true; };
+  }, [sel]); // eslint-disable-line
+  const pick = (v) => { setSel(v); try { localStorage.setItem('clandeck_news_source', v); } catch { /* ignore */ } };
+  const ago = (iso) => { if (!iso) return ''; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); if (!Number.isFinite(m) || m < 0) return ''; if (m < 60) return `${Math.max(m, 1)}m`; if (m < 1440) return `${Math.round(m / 60)}h`; return `${Math.round(m / 1440)}d`; };
+  const current = sel || (sources[0] && sources[0].id) || '';
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>{T.newsT}</div>
+      {sources.length > 1 && (
+        <select value={current} onChange={(e) => pick(e.target.value)} aria-label={T.newsT} style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1px solid #d8c5a3', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', background: '#fff', marginBottom: 8 }}>
+          {sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      )}
+      {state.loading && <p style={{ margin: 0, fontSize: 12, color: '#aaa' }}>{T.newsLoading}</p>}
+      {!state.loading && state.error && <p style={{ margin: 0, fontSize: 12, color: '#b3261e' }}>{state.error}</p>}
+      {!state.loading && !state.error && (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {state.items.map((n, i) => (
+            <a key={n.link + i} href={n.link} target="_blank" rel="noopener noreferrer" style={{ display: 'block', padding: '9px 0', borderTop: i ? '1px solid #f0e9dc' : 'none', color: '#1a1a1a', textDecoration: 'none' }}>
+              <div style={{ fontWeight: 600, fontSize: 12, lineHeight: '17px', wordBreak: 'break-word' }}>{n.title}</div>
+              {n.snippet && <div style={{ fontSize: 11, color: '#777', lineHeight: '16px', marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{n.snippet}</div>}
+              {ago(n.published) && <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>{ago(n.published)}</div>}
+            </a>
+          ))}
+          <p style={{ margin: '8px 0 0', fontSize: 10, color: '#aaa', lineHeight: '14px' }}>{T.newsCredit} {state.name}. {T.newsOpen}{state.stale ? ` ${T.newsOld}` : ''}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// small helpers for a new profile photo: a square, centred crop at 600px, and the original shrunk to 1600px
+const readAsDataUrl = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('Could not read the photo')); r.readAsDataURL(file); });
+const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('That file is not a picture')); i.src = src; });
+const jpegOf = async (src, side, square, quality) => {
+  const img = await loadImg(src);
+  const c = document.createElement('canvas');
+  let sx = 0, sy = 0, sw = img.width, sh = img.height, w, h;
+  if (square) { const m = Math.min(img.width, img.height); sx = (img.width - m) / 2; sy = (img.height - m) / 2; sw = sh = m; w = h = Math.min(side, m); }
+  else { const k = Math.min(1, side / Math.max(img.width, img.height)); w = Math.max(1, Math.round(img.width * k)); h = Math.max(1, Math.round(img.height * k)); }
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', quality);
+};
+const dateOnlyStr = (v) => (v ? String(v).split('T')[0] : '');
 
 // groups other people made and I accepted: they show up in my own profile
 function JoinedGroups({ groups, onOpen }) {
@@ -1041,6 +1157,49 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
       .then((r) => r.json()).then((j) => { if (!dead && j && j.success) setSelfInfo(j.data); }).catch(() => {});
     return () => { dead = true; };
   }, [selfId]);
+  const [photoBusy, setPhotoBusy] = useState('');
+  // save one or more of MY fields: fetch my full record first so the other fields (dates etc.) are kept as they are
+  const saveSelf = async (changes) => {
+    const g = await fetch(`${API_URL}/api/profile/${encodeURIComponent(selfId)}`).then((r) => r.json());
+    if (!g || !g.success) throw new Error((g && g.error) || 'Could not load your profile');
+    const q = g.data;
+    const payload = {
+      display_name: q.display_name, nickname: q.nickname || '', gender: q.gender, dob: dateOnlyStr(q.dob) || null,
+      email: q.email, mobile: q.mobile_number, mobile_number: q.mobile_number, visibility: q.visibility || 'Public',
+      show_in_deck: q.show_in_deck, is_alive: q.is_alive, dod: dateOnlyStr(q.dod) || null,
+      location: q.location || '', bio: q.bio || '', ...changes,
+    };
+    const r = await fetch(`${API_URL}/api/profile/${encodeURIComponent(selfId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (!j || !j.success) throw new Error((j && j.error) || 'Save failed');
+    // keep this page and the other pages in step
+    setSelfInfo((prev) => ({ ...(prev || {}), ...payload, dob: payload.dob, bio: payload.bio, location: payload.location }));
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (changes.display_name) { u.name = changes.display_name; localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('profile_name', changes.display_name); }
+      if (changes.photo_url) { u.photo_url = changes.photo_url; localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('photo_url', changes.photo_url); }
+      if ('nickname' in changes) localStorage.setItem('profile_nickname', changes.nickname || '');
+      if (changes.visibility) localStorage.setItem('profile_visibility', String(changes.visibility).toLowerCase());
+    } catch { /* ignore */ }
+    if ('nickname' in changes || changes.visibility) setProfileInfo((prev) => ({ ...prev, ...('nickname' in changes ? { nickname: changes.nickname || '' } : {}), ...(changes.visibility ? { visibility: String(changes.visibility).toLowerCase() } : {}) }));
+    return payload;
+  };
+  const changePhoto = async (file) => {
+    if (!file) return;
+    setPhotoBusy('Uploading…');
+    try {
+      const src = await readAsDataUrl(file);
+      const compressed = await jpegOf(src, 600, true, 0.8);
+      const original = await jpegOf(src, 1600, false, 0.9);
+      const pr = await fetch(`${API_URL}/api/profile/${encodeURIComponent(selfId)}/photo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ compressed, original }) }).then((r) => r.json());
+      if (!pr || !pr.success) throw new Error((pr && pr.error) || 'Photo upload failed');
+      await saveSelf({ photo_url: pr.compressed_url, photo_original_url: pr.original_url || null, photo_compressed_url: pr.compressed_url, photo_bucket_key: pr.bucket_key || null, photo_x: 0, photo_y: 0, photo_zoom: 1 });
+      setPhotoUrl(pr.compressed_url);
+      const np = { x: 50, y: 50, zoom: 100 }; setPos(np);
+      try { localStorage.setItem('clandeck_photo_pos', JSON.stringify(np)); } catch { /* ignore */ }
+      setPhotoBusy('');
+    } catch (e) { setPhotoBusy(`${T.saveFail}: ${e.message}`); setTimeout(() => setPhotoBusy(''), 4000); }
+  };
 
   const loadGroups = useCallback(async () => {
     try {
@@ -1175,6 +1334,8 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         .pg-font :not(header):not(header *) { font-family: Arial, Helvetica, sans-serif; }
         .deck-grid > * { min-width: 0; }
         .deck-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 16px; width: 100%; padding: 16px 20px; box-sizing: border-box; }
+        .waiting-jump { display: none; }
+        @media(max-width: 1100px){ .waiting-jump { display: block; } }
         .card { background: #fffefb; border: 1px solid #e9e2d6; border-radius: 14px; padding: 18px; }
         .deck-hero .hero-text, .deck-hero .hero-btns { padding-top: 52px; }
         @media(max-width: 700px){
@@ -1206,7 +1367,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         </div>
       )}
 
-      {!viewing && <NoticeBar notes={notes} busyId={noteBusy} onAnswer={answerNote} onOpen={(p) => { setViewing({ ...p, way: '' }); window.scrollTo({ top: 0 }); }} />}
+      {!viewing && notes.length > 0 && <button type="button" className="waiting-jump" onClick={() => { const el = document.getElementById('waiting-card'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }} style={{margin:'12px 20px 0', width:'calc(100% - 40px)', textAlign:'left', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:12, fontSize:13, fontFamily:'inherit', cursor:'pointer'}}>🔔 <b>{notes.length}</b> {T.waitingN}</button>}
 
       {!viewing && tempLogin && (
         <div style={{margin:'12px 20px 0', padding:'10px 14px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap', fontSize:'13px'}}>
@@ -1236,6 +1397,13 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
                     : <img src={photo} alt="profile" style={{width:'100%', height:'100%', objectFit:'cover', objectPosition:`${pos.x}% ${pos.y}%`, transform:`scale(${pos.zoom/100})`}} onError={() => setPhotoUrl('')} />)
                   : (shownName || '?')[0].toUpperCase()}
               </div>
+              {!viewing && (
+                <label title={T.changePhoto} aria-label={T.changePhoto} style={{position:'absolute', left:'104px', top:'132px', width:'34px', height:'34px', borderRadius:'50%', background:'#fff', border:'1px solid #d8c5a3', color:'#1f1a14', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 1px 4px rgba(0,0,0,.15)'}}>
+                  <PenIcon size={16} />
+                  <input type="file" accept="image/*" onChange={(e) => { changePhoto(e.target.files && e.target.files[0]); e.target.value = ''; }} style={{display:'none'}} />
+                </label>
+              )}
+              {photoBusy && <span role="status" style={{position:'absolute', left:'20px', top:'12px', background:'#fff8e1', border:'1px solid #f1dc9a', borderRadius:12, padding:'4px 10px', fontSize:11}}>{photoBusy}</span>}
               <div className="hero-text" style={{flex:'1 1 260px', minWidth:0}}>
                 <h1 style={{margin:0, fontWeight:600, fontSize:'22px', lineHeight:'28px', wordBreak:'break-word'}}>{shownName}{nick && <span style={{fontWeight:400, fontSize:'13px', color:'#888'}}> ({nick})</span>}</h1>
                 <p style={{margin:'2px 0 10px', fontSize:'12px', color:'#888', fontWeight:500}}>{[sub, place].filter(Boolean).join('  ·  ')}</p>
@@ -1262,27 +1430,34 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         <div>
           <div className="card">
             <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:8}}>{T.about}{viewing ? ` ${viewing.display_name.split(' ')[0].toUpperCase()}` : ''}</div>
-            {(viewing ? viewInfo : selfInfo) && (viewing ? viewInfo : selfInfo).bio && <p style={{margin:'0 0 10px', fontSize:'13px', lineHeight:'19px', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{(viewing ? viewInfo : selfInfo).bio}</p>}
-            <div style={{textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px', border:'1px solid #f0e9dc', fontSize:'11px'}}>
-              {(viewing ? [
-                [T.gender, viewInfo && viewInfo.gender],
-                [T.born, viewInfo && fmtDate(viewInfo.dob)],
-                [T.status, viewInfo && !viewInfo.error ? (viewInfo.is_alive ? T.living : (viewInfo.dod ? `${T.passed} ${fmtDate(viewInfo.dod)}` : T.passed)) : ''],
-                [T.location, viewInfo && viewInfo.location],
-              ] : [
-                [T.userId, (storedUser?.id || 'self').slice(0, 22)],
-                [T.name, isPublic ? getName() : T.hidden],
-                [T.nick, profileInfo.nickname ? (isPublic ? profileInfo.nickname : T.hidden) : ''],
-                [T.born, selfInfo && fmtDate(selfInfo.dob)],
-                [T.location, selfInfo && selfInfo.location],
-                [T.visibility, (profileInfo.visibility || '').toUpperCase()],
-              ]).filter(([, v]) => v).map(([k, v]) => (
-                <div key={k} style={{display:'flex', justifyContent:'space-between', gap:8, marginBottom:'6px'}}><span style={{color:'#888', fontWeight:500}}>{k}</span><span style={{fontWeight:500, textAlign:'right', wordBreak:'break-word', color: k === T.visibility ? (profileInfo.visibility === 'public' ? 'green' : 'red') : undefined}}>{v}</span></div>
-              ))}
-            </div>
+            {(() => {
+              const me = !viewing;
+              const info = me ? selfInfo : viewInfo;
+              const sv = (field) => async (v) => { await saveSelf({ [field]: v }); };
+              const visLabel = (v) => (String(v || '').toLowerCase() === 'private' ? T.priv : T.pub);
+              return (
+                <>
+                  <EditableRow T={T} label={T.bio} canEdit={me} multiline value={info && info.bio} display={info && info.bio} onSave={sv('bio')} />
+                  <div style={{textAlign:'left', background:'#faf7f2', borderRadius:'10px', padding:'10px 10px 2px', border:'1px solid #f0e9dc', marginTop:8}}>
+                    {me && <div style={{display:'flex', justifyContent:'space-between', gap:8, marginBottom:8, fontSize:11}}><span style={{color:'#888', fontWeight:500}}>{T.userId}</span><span style={{fontWeight:500}}>{(storedUser?.id || 'self').slice(0, 22)}</span></div>}
+                    <EditableRow T={T} label={T.name} canEdit={me} value={me ? getName() : ''} display={me ? (isPublic ? getName() : T.hidden) : viewing.display_name} onSave={async (v) => { if (!String(v).trim()) throw new Error('Name is needed'); await saveSelf({ display_name: String(v).trim() }); }} />
+                    <EditableRow T={T} label={T.nick} canEdit={me} value={me ? profileInfo.nickname : ''} display={me ? profileInfo.nickname : (viewing.nickname || '')} onSave={sv('nickname')} />
+                    <EditableRow T={T} label={T.gender} canEdit={me} value={info && info.gender} display={info && info.gender} options={[['Male', T.male], ['Female', T.female]]} onSave={sv('gender')} />
+                    <EditableRow T={T} label={T.born} canEdit={me} type="date" value={info && dateOnlyStr(info.dob)} display={info && info.dob ? fmtDate(info.dob) : ''} onSave={async (v) => { await saveSelf({ dob: v || null }); }} />
+                    <EditableRow T={T} label={T.location} canEdit={me} value={info && info.location} display={info && info.location} onSave={sv('location')} />
+                    {me
+                      ? <EditableRow T={T} label={T.visibility} canEdit value={profileInfo.visibility === 'private' ? 'Private' : 'Public'} display={visLabel(profileInfo.visibility)} options={[['Public', T.pub], ['Private', T.priv]]} onSave={sv('visibility')} />
+                      : <EditableRow T={T} label={T.status} canEdit={false} display={viewInfo && !viewInfo.error ? (viewInfo.is_alive ? T.living : (viewInfo.dod ? `${T.passed} ${fmtDate(viewInfo.dod)}` : T.passed)) : ''} />}
+                  </div>
+                </>
+              );
+            })()}
             {viewing && viewInfo && viewInfo.error && <p style={{fontSize:'12px', color:'#b3261e', marginTop:10}}>{viewInfo.error}</p>}
             <p style={{fontSize:'10px', color:'#aaa', margin:'10px 0 0', lineHeight:'14px'}}>{T.publicNote}</p>
           </div>
+
+          {!viewing && <div style={{marginTop:'12px'}}><GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} ownerId={storedUser?.id} onInvite={(m) => setGroupInvite({ person: m, mobile: '', result: null })} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} /></div>}
+          {!viewing && <JoinedGroups groups={joined} onOpen={(m) => { setViewing({ ...m, way: '' }); window.scrollTo({ top: 0 }); }} />}
         </div>
 
         <div style={{minWidth:0}}>
@@ -1306,7 +1481,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
             </div>
           ) : <div className="card" style={{textAlign:'center', padding:'40px'}}><p style={{color:'#aaa', fontSize:'13px'}}>Family Tree is hidden</p></div>}
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:'12px', marginTop:'12px'}}>
-            {[T.photos, T.news, T.scrap].map((t) => (
+            {[T.photos, T.scrap].map((t) => (
               <div key={t} className="card" style={{minWidth:0}}>
                 <div style={{fontSize:'11px', fontWeight:600, color:'#888', letterSpacing:'1px', marginBottom:6}}>{t}</div>
                 <p style={{margin:0, fontSize:'12px', color:'#aaa'}}><i>({T.soon})</i></p>
@@ -1316,8 +1491,8 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         </div>
 
         <div>
-          {!viewing && <GroupsCard groups={groups} homeId={storedUser?.id || storedUser?.uname} ownerId={storedUser?.id} onInvite={(m) => setGroupInvite({ person: m, mobile: '', result: null })} onChange={setGroups} onOpen={(m, gname) => setOpenReq({ path: [{ p: m, rel: gname }], n: Date.now() })} />}
-          {!viewing && <JoinedGroups groups={joined} onOpen={(m) => { setViewing({ ...m, way: '' }); window.scrollTo({ top: 0 }); }} />}
+          {!viewing && <WaitingCard notes={notes} busyId={noteBusy} onAnswer={answerNote} onOpen={(p) => { setViewing({ ...p, way: '' }); window.scrollTo({ top: 0 }); }} T={T} />}
+          {!viewing && <div style={{marginTop:'16px'}}><NewsCorner T={T} /></div>}
           <div style={{marginTop: viewing ? 0 : '16px'}}><AdSlot kind="square" /></div>
         </div>
       </div>
