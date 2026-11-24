@@ -1919,6 +1919,10 @@ app.post('/api/profile/:id/photo', async (req, res) => {
       if (!originalBuf) return res.status(400).json({ success: false, error: 'Invalid or too large original image' });
     }
 
+    if (req.body.kind === 'cover') {                       // top banner picture: one file, replaced on every upload
+      await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: `${id}/cover/cover.jpg`, Body: compressedBuf, ContentType: 'image/jpeg' }));
+      return res.json({ success: true, cover_url: `${PUBLIC_API_URL}/api/photos/${id}/cover.jpg?v=${Date.now()}` });
+    }
     const prefix = `${id}/profileimg`;
     await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: `${prefix}/compressed.jpg`, Body: compressedBuf, ContentType: 'image/jpeg' }));
     if (originalBuf) {
@@ -1940,10 +1944,11 @@ app.post('/api/profile/:id/photo', async (req, res) => {
 
 app.get('/api/photos/:id/:file', async (req, res) => {
   const { id, file } = req.params;
-  if (!SAFE_ID.test(id) || !['compressed.jpg', 'original.jpg'].includes(file)) return res.status(404).end();
+  if (!SAFE_ID.test(id) || !['compressed.jpg', 'original.jpg', 'cover.jpg'].includes(file)) return res.status(404).end();
   try {
-    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `${id}/profileimg/${file}` }));
-    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' });
+    const key = file === 'cover.jpg' ? `${id}/cover/cover.jpg` : `${id}/profileimg/${file}`;
+    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': file === 'cover.jpg' ? 'public, max-age=300' : 'public, max-age=31536000, immutable' });
     // Plain <img> requests carry no Origin header, so the cors middleware adds nothing; allow reading the picture
     // on a canvas later (re-cropping) without a stale cached copy blocking it.
     if (!res.get('Access-Control-Allow-Origin')) res.set('Access-Control-Allow-Origin', '*');

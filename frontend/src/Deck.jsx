@@ -840,9 +840,9 @@ function SearchPanel({ q, homeId, onPick, onClose }) {
 // Covers the words on this page. Other pages follow later. Malayalam and Hindi wording is a first draft for a native speaker to check.
 const LANGS = [['en', 'English'], ['ml', 'മലയാളം'], ['hi', 'हिन्दी']];
 const STR = {
-  en: { newsCredit: 'Headlines from', newsOpen: 'Tap a headline to read it on the publisher\'s site.', newsLoading: 'Loading headlines…', newsDown: 'News is not available right now.', newsOld: 'Showing the last headlines we got.', edit: 'Edit', save: 'Save', cancel: 'Cancel', saving: 'Saving…', changePhoto: 'Change photo', waiting: 'Waiting for you', nothing: 'Nothing is waiting for you right now', waitingN: 'waiting for you', myGroups: 'My groups', newsT: 'News corner', bio: 'BIO', noBio: 'Add a few lines about yourself', male: 'Male', female: 'Female', pub: 'Public', priv: 'Private', saveFail: 'Could not save', points: 'POINTS', cards: 'CARDS IN DECK', card: 'CARD IN DECK', family: 'FAMILY MEMBERS', groups: 'GROUPS', openChats: 'Open chats', editProfile: 'Edit profile', about: 'ABOUT', userId: 'USER ID', name: 'NAME', nick: 'NICK NAME', visibility: 'VISIBILITY', gender: 'GENDER', born: 'BORN', status: 'STATUS', location: 'LOCATION', living: 'Living', passed: 'Passed away', photos: 'Photos and videos', news: 'News corner', scrap: 'Scrap wall', soon: 'coming soon', hidden: 'Hidden', language: 'Language', member: 'Member of ClanDeck', added: 'Added by a relative or friend', publicNote: 'Everyone can see cards and points' },
-  ml: { newsCredit: 'തലക്കെട്ടുകൾ:', newsOpen: 'പ്രസാധകരുടെ സൈറ്റിൽ വായിക്കാൻ തലക്കെട്ടിൽ തൊടുക.', newsLoading: 'തലക്കെട്ടുകൾ ലോഡ് ചെയ്യുന്നു…', newsDown: 'ഇപ്പോൾ വാർത്ത ലഭ്യമല്ല.', newsOld: 'അവസാനം ലഭിച്ച തലക്കെട്ടുകൾ കാണിക്കുന്നു.', edit: 'തിരുത്തുക', save: 'സേവ്', cancel: 'റദ്ദാക്കുക', saving: 'സേവ് ചെയ്യുന്നു…', changePhoto: 'ഫോട്ടോ മാറ്റുക', waiting: 'നിങ്ങളെ കാത്തിരിക്കുന്നത്', nothing: 'ഇപ്പോൾ ഒന്നും കാത്തിരിക്കുന്നില്ല', waitingN: 'നിങ്ങളെ കാത്തിരിക്കുന്നു', myGroups: 'എന്റെ ഗ്രൂപ്പുകൾ', newsT: 'വാർത്താ കോർണർ', bio: 'ചെറുവിവരണം', noBio: 'നിങ്ങളെക്കുറിച്ച് ചില വരികൾ ചേർക്കുക', male: 'പുരുഷൻ', female: 'സ്ത്രീ', pub: 'പൊതു', priv: 'സ്വകാര്യം', saveFail: 'സേവ് ചെയ്യാനായില്ല', points: 'പോയിന്റ്', cards: 'ഡെക്കിലെ കാർഡുകൾ', card: 'ഡെക്കിലെ കാർഡ്', family: 'കുടുംബാംഗങ്ങൾ', groups: 'ഗ്രൂപ്പുകൾ', openChats: 'ചാറ്റുകൾ തുറക്കുക', editProfile: 'പ്രൊഫൈൽ എഡിറ്റ്', about: 'വിവരങ്ങൾ', userId: 'യൂസർ ഐഡി', name: 'പേര്', nick: 'വിളിപ്പേര്', visibility: 'ദൃശ്യത', gender: 'ലിംഗം', born: 'ജനനം', status: 'നില', location: 'സ്ഥലം', living: 'ജീവിച്ചിരിക്കുന്നു', passed: 'മരണമടഞ്ഞു', photos: 'ഫോട്ടോകളും വീഡിയോകളും', news: 'വാർത്താ കോർണർ', scrap: 'സ്ക്രാപ്പ് ഭിത്തി', soon: 'ഉടൻ വരുന്നു', hidden: 'മറച്ചിരിക്കുന്നു', language: 'ഭാഷ', member: 'ക്ലാൻഡെക്ക് അംഗം', added: 'ബന്ധുവോ സുഹൃത്തോ ചേർത്തത്', publicNote: 'കാർഡുകളും പോയിന്റും എല്ലാവർക്കും കാണാം' },
-  hi: { newsCredit: 'सुर्खियाँ:', newsOpen: 'प्रकाशक की साइट पर पढ़ने के लिए सुर्खी पर टैप करें।', newsLoading: 'सुर्खियाँ लोड हो रही हैं…', newsDown: 'अभी समाचार उपलब्ध नहीं है।', newsOld: 'पिछली मिली सुर्खियाँ दिखा रहे हैं।', edit: 'बदलें', save: 'सहेजें', cancel: 'रद्द करें', saving: 'सहेज रहे हैं…', changePhoto: 'फ़ोटो बदलें', waiting: 'आपका इंतज़ार', nothing: 'अभी आपका कुछ इंतज़ार नहीं कर रहा', waitingN: 'आपका इंतज़ार कर रहे हैं', myGroups: 'मेरे ग्रुप', newsT: 'समाचार कोना', bio: 'संक्षिप्त परिचय', noBio: 'अपने बारे में कुछ पंक्तियाँ जोड़ें', male: 'पुरुष', female: 'महिला', pub: 'सार्वजनिक', priv: 'निजी', saveFail: 'सहेज नहीं सके', points: 'पॉइंट', cards: 'डेक में कार्ड', card: 'डेक में कार्ड', family: 'परिवार के सदस्य', groups: 'ग्रुप', openChats: 'चैट खोलें', editProfile: 'प्रोफ़ाइल बदलें', about: 'परिचय', userId: 'यूज़र आईडी', name: 'नाम', nick: 'उपनाम', visibility: 'दृश्यता', gender: 'लिंग', born: 'जन्म', status: 'स्थिति', location: 'स्थान', living: 'जीवित', passed: 'स्वर्गवासी', photos: 'फ़ोटो और वीडियो', news: 'समाचार कोना', scrap: 'स्क्रैप वॉल', soon: 'जल्द आ रहा है', hidden: 'छिपा हुआ', language: 'भाषा', member: 'क्लैनडेक सदस्य', added: 'रिश्तेदार या दोस्त ने जोड़ा', publicNote: 'कार्ड और पॉइंट सभी देख सकते हैं' },
+  en: { changeCover: 'Change cover photo', newsCredit: 'Headlines from', newsOpen: 'Tap a headline to read it on the publisher\'s site.', newsLoading: 'Loading headlines…', newsDown: 'News is not available right now.', newsOld: 'Showing the last headlines we got.', edit: 'Edit', save: 'Save', cancel: 'Cancel', saving: 'Saving…', changePhoto: 'Change photo', waiting: 'Waiting for you', nothing: 'Nothing is waiting for you right now', waitingN: 'waiting for you', myGroups: 'My groups', newsT: 'News corner', bio: 'BIO', noBio: 'Add a few lines about yourself', male: 'Male', female: 'Female', pub: 'Public', priv: 'Private', saveFail: 'Could not save', points: 'POINTS', cards: 'CARDS IN DECK', card: 'CARD IN DECK', family: 'FAMILY MEMBERS', groups: 'GROUPS', openChats: 'Open chats', editProfile: 'Edit profile', about: 'ABOUT', userId: 'USER ID', name: 'NAME', nick: 'NICK NAME', visibility: 'VISIBILITY', gender: 'GENDER', born: 'BORN', status: 'STATUS', location: 'LOCATION', living: 'Living', passed: 'Passed away', photos: 'Photos and videos', news: 'News corner', scrap: 'Scrap wall', soon: 'coming soon', hidden: 'Hidden', language: 'Language', member: 'Member of ClanDeck', added: 'Added by a relative or friend', publicNote: 'Everyone can see cards and points' },
+  ml: { changeCover: 'കവർ ഫോട്ടോ മാറ്റുക', newsCredit: 'തലക്കെട്ടുകൾ:', newsOpen: 'പ്രസാധകരുടെ സൈറ്റിൽ വായിക്കാൻ തലക്കെട്ടിൽ തൊടുക.', newsLoading: 'തലക്കെട്ടുകൾ ലോഡ് ചെയ്യുന്നു…', newsDown: 'ഇപ്പോൾ വാർത്ത ലഭ്യമല്ല.', newsOld: 'അവസാനം ലഭിച്ച തലക്കെട്ടുകൾ കാണിക്കുന്നു.', edit: 'തിരുത്തുക', save: 'സേവ്', cancel: 'റദ്ദാക്കുക', saving: 'സേവ് ചെയ്യുന്നു…', changePhoto: 'ഫോട്ടോ മാറ്റുക', waiting: 'നിങ്ങളെ കാത്തിരിക്കുന്നത്', nothing: 'ഇപ്പോൾ ഒന്നും കാത്തിരിക്കുന്നില്ല', waitingN: 'നിങ്ങളെ കാത്തിരിക്കുന്നു', myGroups: 'എന്റെ ഗ്രൂപ്പുകൾ', newsT: 'വാർത്താ കോർണർ', bio: 'ചെറുവിവരണം', noBio: 'നിങ്ങളെക്കുറിച്ച് ചില വരികൾ ചേർക്കുക', male: 'പുരുഷൻ', female: 'സ്ത്രീ', pub: 'പൊതു', priv: 'സ്വകാര്യം', saveFail: 'സേവ് ചെയ്യാനായില്ല', points: 'പോയിന്റ്', cards: 'ഡെക്കിലെ കാർഡുകൾ', card: 'ഡെക്കിലെ കാർഡ്', family: 'കുടുംബാംഗങ്ങൾ', groups: 'ഗ്രൂപ്പുകൾ', openChats: 'ചാറ്റുകൾ തുറക്കുക', editProfile: 'പ്രൊഫൈൽ എഡിറ്റ്', about: 'വിവരങ്ങൾ', userId: 'യൂസർ ഐഡി', name: 'പേര്', nick: 'വിളിപ്പേര്', visibility: 'ദൃശ്യത', gender: 'ലിംഗം', born: 'ജനനം', status: 'നില', location: 'സ്ഥലം', living: 'ജീവിച്ചിരിക്കുന്നു', passed: 'മരണമടഞ്ഞു', photos: 'ഫോട്ടോകളും വീഡിയോകളും', news: 'വാർത്താ കോർണർ', scrap: 'സ്ക്രാപ്പ് ഭിത്തി', soon: 'ഉടൻ വരുന്നു', hidden: 'മറച്ചിരിക്കുന്നു', language: 'ഭാഷ', member: 'ക്ലാൻഡെക്ക് അംഗം', added: 'ബന്ധുവോ സുഹൃത്തോ ചേർത്തത്', publicNote: 'കാർഡുകളും പോയിന്റും എല്ലാവർക്കും കാണാം' },
+  hi: { changeCover: 'कवर फ़ोटो बदलें', newsCredit: 'सुर्खियाँ:', newsOpen: 'प्रकाशक की साइट पर पढ़ने के लिए सुर्खी पर टैप करें।', newsLoading: 'सुर्खियाँ लोड हो रही हैं…', newsDown: 'अभी समाचार उपलब्ध नहीं है।', newsOld: 'पिछली मिली सुर्खियाँ दिखा रहे हैं।', edit: 'बदलें', save: 'सहेजें', cancel: 'रद्द करें', saving: 'सहेज रहे हैं…', changePhoto: 'फ़ोटो बदलें', waiting: 'आपका इंतज़ार', nothing: 'अभी आपका कुछ इंतज़ार नहीं कर रहा', waitingN: 'आपका इंतज़ार कर रहे हैं', myGroups: 'मेरे ग्रुप', newsT: 'समाचार कोना', bio: 'संक्षिप्त परिचय', noBio: 'अपने बारे में कुछ पंक्तियाँ जोड़ें', male: 'पुरुष', female: 'महिला', pub: 'सार्वजनिक', priv: 'निजी', saveFail: 'सहेज नहीं सके', points: 'पॉइंट', cards: 'डेक में कार्ड', card: 'डेक में कार्ड', family: 'परिवार के सदस्य', groups: 'ग्रुप', openChats: 'चैट खोलें', editProfile: 'प्रोफ़ाइल बदलें', about: 'परिचय', userId: 'यूज़र आईडी', name: 'नाम', nick: 'उपनाम', visibility: 'दृश्यता', gender: 'लिंग', born: 'जन्म', status: 'स्थिति', location: 'स्थान', living: 'जीवित', passed: 'स्वर्गवासी', photos: 'फ़ोटो और वीडियो', news: 'समाचार कोना', scrap: 'स्क्रैप वॉल', soon: 'जल्द आ रहा है', hidden: 'छिपा हुआ', language: 'भाषा', member: 'क्लैनडेक सदस्य', added: 'रिश्तेदार या दोस्त ने जोड़ा', publicNote: 'कार्ड और पॉइंट सभी देख सकते हैं' },
 };
 function useLang() {
   const [lang, setLangState] = useState(() => { try { const v = localStorage.getItem('clandeck_lang'); return STR[v] ? v : 'en'; } catch { return 'en'; } });
@@ -1009,6 +1009,16 @@ const jpegOf = async (src, side, square, quality) => {
   const ctx = c.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
   return c.toDataURL('image/jpeg', quality);
 };
+const coverJpegOf = async (src) => {           // wide banner crop from the middle of the picture
+  const img = await loadImg(src);
+  const W = Math.min(1600, img.width), H = Math.round(W * 0.25);
+  let sw = img.width, sh = Math.round(img.width * 0.25);
+  if (sh > img.height) { sh = img.height; sw = Math.round(img.height * 4); }
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, W, H);
+  return c.toDataURL('image/jpeg', 0.82);
+};
 const dateOnlyStr = (v) => (v ? String(v).split('T')[0] : '');
 
 // groups other people made and I accepted: they show up in my own profile
@@ -1158,6 +1168,20 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
     return () => { dead = true; };
   }, [selfId]);
   const [photoBusy, setPhotoBusy] = useState('');
+  const [coverVer, setCoverVer] = useState('');
+  const [coverOk, setCoverOk] = useState(true);
+  useEffect(() => { setCoverOk(true); }, [viewing ? viewing.id : selfId]); // eslint-disable-line
+  const changeCover = async (file) => {
+    if (!file) return;
+    setPhotoBusy('Uploading…');
+    try {
+      const src = await readAsDataUrl(file);
+      const compressed = await coverJpegOf(src);
+      const pr = await fetch(`${API_URL}/api/profile/${encodeURIComponent(selfId)}/photo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'cover', compressed }) }).then((r) => r.json());
+      if (!pr || !pr.success) throw new Error((pr && pr.error) || 'Photo upload failed');
+      setCoverOk(true); setCoverVer(String(Date.now())); setPhotoBusy('');
+    } catch (e) { setPhotoBusy(`${T.saveFail}: ${e.message}`); setTimeout(() => setPhotoBusy(''), 4000); }
+  };
   // save one or more of MY fields: fetch my full record first so the other fields (dates etc.) are kept as they are
   const saveSelf = async (changes) => {
     const g = await fetch(`${API_URL}/api/profile/${encodeURIComponent(selfId)}`).then((r) => r.json());
@@ -1388,7 +1412,15 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
         );
         return (
           <section className="deck-hero" style={{margin:'12px 20px 0', background:'#fffefb', border:'1px solid #e9e2d6', borderRadius:'18px', overflow:'hidden', position:'relative'}}>
-            <div style={{height:'96px', background:'#eadcc0'}} />
+            <div style={{height:'96px', background:'#eadcc0', position:'relative', overflow:'hidden'}}>
+              {coverOk && <img key={(viewing ? viewing.id : selfId) + coverVer} src={`${API_URL}/api/photos/${encodeURIComponent(viewing ? viewing.id : selfId)}/cover.jpg${coverVer ? `?v=${coverVer}` : ''}`} alt="" onError={() => setCoverOk(false)} style={{position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover'}} />}
+              {!viewing && (
+                <label title={T.changeCover} aria-label={T.changeCover} style={{position:'absolute', right:'12px', top:'12px', width:'34px', height:'34px', borderRadius:'50%', background:'#fff', border:'1px solid #d8c5a3', color:'#1f1a14', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 1px 4px rgba(0,0,0,.15)'}}>
+                  <PenIcon size={16} />
+                  <input type="file" accept="image/*" onChange={(e) => { changeCover(e.target.files && e.target.files[0]); e.target.value = ''; }} style={{display:'none'}} />
+                </label>
+              )}
+            </div>
             <div style={{padding:'0 20px 18px', display:'flex', flexWrap:'wrap', gap:'16px', alignItems:'flex-end', marginTop:'-48px'}}>
               <div style={{width:'112px', height:'112px', background:'#c9ad83', color:'white', borderRadius:'22px', border:'4px solid #fff', boxSizing:'border-box', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'42px', fontWeight:600, overflow:'hidden', flexShrink:0}}>
                 {photo
