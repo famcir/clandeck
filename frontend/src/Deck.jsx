@@ -273,7 +273,7 @@ function Chip({ item, p, index, isLast, isLogin, x, y = 14, D, onJump, onView })
  *  - Line view: same tree, but the path you followed stays on top as a connected line
  *    (You → Father → Father's sibling → ...). Click any earlier person on the path to jump back to them.
  */
-function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile }) {
+function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile, onCount }) {
   const D = useDims();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('clandeck_tree_view') === 'line' ? 'line' : 'tree'; } catch { return 'tree'; }
@@ -318,6 +318,7 @@ function FamilyTree({ userId, onFocus, openReq, readOnly = false, onViewProfile 
         setData(j);
         if (focusId === userId) { setHome(j.myProfile); if (!readOnly) setMyProfileId(j.myProfile.id); }
         if (onFocus) onFocus(j.myProfile);
+        if (onCount && focusId === userId && !readOnly) { const f = j.family || {}; onCount((f.father ? 1 : 0) + (f.mother ? 1 : 0) + (f.siblings || []).length + (f.spouses || []).length + (f.children || []).length); }
       })
       .catch((e) => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
@@ -712,7 +713,7 @@ function GroupsCard({ groups, homeId, ownerId, onChange, onOpen, onInvite }) {
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <h3 style={{ fontWeight: 600, fontSize: 12, margin: 0 }}>My Groups ({groups.length})</h3>
+        <h3 style={{ fontWeight: 600, fontSize: 12, margin: 0 }}>My Groups ({groups.filter((g) => !g.is_default).length})</h3>
         <button type="button" onClick={() => { setShowNew((v) => !v); setErr(''); }} style={smallPill(!showNew)}>{showNew ? 'Cancel' : '＋ New group'}</button>
       </div>
 
@@ -1113,6 +1114,7 @@ const fmtDate = (d) => {
 export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const [family, setFamily] = useState([]);
+  const [treeCount, setTreeCount] = useState(null);    // people shown in my own tree (father, mother, brothers/sisters, partner, children)
   const [groups, setGroups] = useState([]);
   const [privacy, setPrivacy] = useState({});
   const [showChat, setShowChat] = useState(false);
@@ -1442,8 +1444,8 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
                 <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
                   {pill(pts ? fmtPoints(pts.points) : '–', T.points, '#fdebc4')}
                   {pill(pts ? pts.cards : '–', pts && pts.cards === 1 ? T.card : T.cards, '#fdebc4')}
-                  {!viewing && pill(visibleFamily.length + 1, T.family, '#f3ead8')}
-                  {!viewing && pill(groups.length, T.groups, '#f3ead8')}
+                  {!viewing && pill(treeCount === null ? '–' : treeCount, T.family, '#f3ead8')}
+                  {!viewing && pill(groups.filter((g) => !g.is_default).length + joined.length, T.groups, '#f3ead8')}
                 </div>
               </div>
               <div className="hero-btns" style={{display:'flex', alignItems:'center'}}>
@@ -1499,7 +1501,7 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', fontWeight: 600, fontSize:'13px'}}>{viewing.inMyTree ? `Your line to ${viewing.display_name}` : `${viewing.display_name.split(' ')[0]}'s Family Tree`}</div>
               {viewing.inMyTree
-                ? <FamilyTree key="mine" userId={storedUser?.id || storedUser?.uname} openReq={openReq} onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way, inMyTree: true }); window.scrollTo({ top: 0 }); } }} />
+                ? <FamilyTree key="mine" userId={storedUser?.id || storedUser?.uname} onCount={setTreeCount} openReq={openReq} onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way, inMyTree: true }); window.scrollTo({ top: 0 }); } }} />
                 : <FamilyTree key={viewing.id} userId={viewing.id} readOnly onViewProfile={(p, way) => { if (p.id !== viewing.id) { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); } }} />}
             </div>
             </>
@@ -1507,9 +1509,9 @@ export default function Deck({ onGoProfile, onLogout, onGoNotifications }) {
             <div style={{background:'white', border:'1px solid #e9e2d6', borderRadius:'14px', overflow:'hidden', minHeight:'540px'}}>
               <div style={{background:'#efe8d3', borderBottom:'1px solid #e9e2d6', padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <span style={{fontWeight: 600, fontSize:'13px'}}>{isPublic ? getName().split(' ')[0] : 'Hidden'}'s Family Tree {isPublic && profileInfo.nickname ? `(${profileInfo.nickname})` : ''}</span>
-                <span style={{fontSize:'10px', background:'white', padding:'4px 10px', borderRadius:'20px', fontWeight: 500, border:'1px solid #e9e2d6'}}>{visibleFamily.length + 1} Members • {profileInfo.visibility}</span>
+                <span style={{fontSize:'10px', background:'white', padding:'4px 10px', borderRadius:'20px', fontWeight: 500, border:'1px solid #e9e2d6'}}>{treeCount === null ? '–' : treeCount} Members • {profileInfo.visibility}</span>
               </div>
-              <FamilyTree userId={storedUser?.id || storedUser?.uname} openReq={openReq} onViewProfile={(p, way) => { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); }} />
+              <FamilyTree userId={storedUser?.id || storedUser?.uname} onCount={setTreeCount} openReq={openReq} onViewProfile={(p, way) => { setViewing({ ...p, way }); window.scrollTo({ top: 0 }); }} />
             </div>
           ) : <div className="card" style={{textAlign:'center', padding:'40px'}}><p style={{color:'#aaa', fontSize:'13px'}}>Family Tree is hidden</p></div>}
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:'12px', marginTop:'12px'}}>
