@@ -1340,6 +1340,19 @@ app.get('/api/admin/users', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Admin: give a user a NEW temporary password (the old one cannot be read, only replaced).
+// The new password is shown once to the admin, stored hashed, and the person is asked to choose their own at next login.
+app.post('/api/admin/users/:id/reset-password', adminAuth, async (req, res) => {
+  try {
+    const [u] = await pool.query('SELECT id, uname, name FROM users WHERE id = ? LIMIT 1', [String(req.params.id)]);
+    if (!u.length) return res.status(404).json({ success: false, message: 'User not found' });
+    const password = makeTempPassword();
+    await pool.query(`UPDATE users SET password = ?, is_temp = 1, created_at = NOW(), status = 'active' WHERE id = ?`, [hashPassword(password), u[0].id]);
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, username: u[0].uname || '', name: u[0].name || '', password, valid_days: TEMP_LOGIN_DAYS });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 function getTree(dir, depth = 0, maxDepth = 4) {
   if (depth > maxDepth) return [];
   try {

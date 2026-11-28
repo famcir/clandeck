@@ -62,6 +62,8 @@ export default function AdminDB() {
   const [userFind, setUserFind] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [copied, setCopied] = useState('');
+  const [newPw, setNewPw] = useState(null);        // { id, password, days } shown once after a reset
+  const [resetting, setResetting] = useState(false);
   const folderInputRef = useRef(null);
 
   // Remove any old key that earlier versions of this page saved in the browser
@@ -77,7 +79,7 @@ export default function AdminDB() {
     setSelected('');
     setFileStructure(null);
     setLocalFileStructure(null);
-    setUsers(null); setUserId(''); setShowPw(false);
+    setUsers(null); setUserId(''); setShowPw(false); setNewPw(null);
     setErr(message);
   };
 
@@ -153,6 +155,19 @@ export default function AdminDB() {
       if (json.data.length && !userId) setUserId(json.data[0].id);
     } catch (e) { setUsers([]); setErr('Could not load users: ' + e.message); }
   };
+  const resetPassword = async (u) => {
+    if (!window.confirm(`Set a NEW temporary password for ${u.name || u.uname}? Their old password will stop working.`)) return;
+    setResetting(true); setErr('');
+    try {
+      const res = await fetch(`${API_URL}/api/admin/users/${encodeURIComponent(u.id)}/reset-password`, { method: 'POST', headers: { 'x-admin-key': adminKey } });
+      if (res.status === 401) { lock('Wrong or expired admin key'); return; }
+      const j = await res.json();
+      if (!j.success) throw new Error(j.message || 'Could not reset');
+      setNewPw({ id: u.id, password: j.password, days: j.valid_days });
+      await loadUsers();
+    } catch (e) { setErr('Could not set a new password: ' + e.message); }
+    setResetting(false);
+  };
   const copyText = async (label, text) => { try { await navigator.clipboard.writeText(text); setCopied(label); setTimeout(() => setCopied(''), 1500); } catch { /* clipboard blocked */ } };
 
   const handleLocalFolderPick = (e) => {
@@ -164,7 +179,7 @@ export default function AdminDB() {
   };
 
   useEffect(() => { if (adminKey && activeTab === 'users' && !users) loadUsers(); }, [activeTab, adminKey]); // eslint-disable-line
-  useEffect(() => { setShowPw(false); }, [userId, activeTab]);
+  useEffect(() => { setShowPw(false); setNewPw(null); }, [userId, activeTab]);
   useEffect(() => { if (adminKey && activeTab === 'files' && !fileStructure) loadFileStructure(); }, [activeTab, adminKey]);
   useEffect(() => { if (adminKey && activeTab === 'local' && !localFileStructure) loadLocalFileStructure(); }, [activeTab, adminKey]);
 
@@ -302,9 +317,11 @@ export default function AdminDB() {
                             <button type="button" onClick={()=>setShowPw((v)=>!v)} style={smallBtn}>{showPw ? 'Hide' : 'Show'}</button>
                             <button type="button" onClick={()=>copyText('pw', u.password)} style={smallBtn}>{copied==='pw' ? 'Copied' : 'Copy'}</button></>
                         : u.password_kind === 'hashed'
-                          ? <span style={{color:'#92400e'}}>Saved securely (hashed). It cannot be shown, only replaced.</span>
+                          ? <span style={{color:'#92400e'}}>Saved securely (hashed). It cannot be shown, only replaced.
+                              <button type="button" disabled={resetting} onClick={()=>resetPassword(u)} style={{...smallBtn, color:'#111'}}>{resetting ? 'Please wait…' : 'Set new password'}</button></span>
                           : <span style={{color:'#b91c1c'}}>No password set</span>,
                       u.password_kind === 'plain')}
+                    {newPw && newPw.id === u.id && row('New password', <><b style={{fontFamily:'monospace', fontSize:'16px'}}>{newPw.password}</b><button type="button" onClick={()=>copyText('new', newPw.password)} style={smallBtn}>{copied==='new' ? 'Copied' : 'Copy'}</button><div style={{fontSize:'12px', color:'#92400e', marginTop:4}}>Shown only now. Give it to the person: it works for {newPw.days} days, and they choose their own at login.</div></>, true)}
                     {row('Password type', u.password_kind === 'plain' ? 'Plain text (old account)' : u.password_kind === 'hashed' ? 'Hashed' : 'None')}
                     {row('Temporary login', u.is_temp ? 'Yes' : 'No')}
                     {row('Status', u.status)}
