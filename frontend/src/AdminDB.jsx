@@ -57,6 +57,11 @@ export default function AdminDB() {
   const [fileStructure, setFileStructure] = useState(null);
   const [localFileStructure, setLocalFileStructure] = useState(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [users, setUsers] = useState(null);
+  const [userId, setUserId] = useState('');
+  const [userFind, setUserFind] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [copied, setCopied] = useState('');
   const folderInputRef = useRef(null);
 
   // Remove any old key that earlier versions of this page saved in the browser
@@ -72,6 +77,7 @@ export default function AdminDB() {
     setSelected('');
     setFileStructure(null);
     setLocalFileStructure(null);
+    setUsers(null); setUserId(''); setShowPw(false);
     setErr(message);
   };
 
@@ -137,6 +143,18 @@ export default function AdminDB() {
     setLoadingFiles(false);
   };
 
+  const loadUsers = async () => {
+    try {
+      const res = await adminFetch('/api/admin/users');
+      if (res.status === 401) { lock('Wrong or expired admin key'); return; }
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message || 'Could not load users');
+      setUsers(json.data);
+      if (json.data.length && !userId) setUserId(json.data[0].id);
+    } catch (e) { setUsers([]); setErr('Could not load users: ' + e.message); }
+  };
+  const copyText = async (label, text) => { try { await navigator.clipboard.writeText(text); setCopied(label); setTimeout(() => setCopied(''), 1500); } catch { /* clipboard blocked */ } };
+
   const handleLocalFolderPick = (e) => {
     const files = e.target.files;
     if(!files || files.length===0) return;
@@ -145,6 +163,8 @@ export default function AdminDB() {
     setLocalFileStructure(tree);
   };
 
+  useEffect(() => { if (adminKey && activeTab === 'users' && !users) loadUsers(); }, [activeTab, adminKey]); // eslint-disable-line
+  useEffect(() => { setShowPw(false); }, [userId, activeTab]);
   useEffect(() => { if (adminKey && activeTab === 'files' && !fileStructure) loadFileStructure(); }, [activeTab, adminKey]);
   useEffect(() => { if (adminKey && activeTab === 'local' && !localFileStructure) loadLocalFileStructure(); }, [activeTab, adminKey]);
 
@@ -199,6 +219,7 @@ export default function AdminDB() {
         <h3 style={{fontSize:'14px', fontWeight:800, marginBottom:16}}>Admin Panel</h3>
         <div style={{display:'flex', flexDirection:'column', gap:8}}>
           <button onClick={()=>setActiveTab('tables')} style={btnStyle(activeTab==='tables')}>📊 Table Details</button>
+          <button onClick={()=>setActiveTab('users')} style={btnStyle(activeTab==='users')}>👤 User Details</button>
           <button onClick={()=>setActiveTab('files')} style={btnStyle(activeTab==='files')}>📁 File Structure</button>
           <button onClick={()=>{setActiveTab('local'); if(!localFileStructure) loadLocalFileStructure();}} style={btnStyle(activeTab==='local')}>💻 Local File Structure</button>
         </div>
@@ -245,6 +266,57 @@ export default function AdminDB() {
               )}
             </>
           )}
+
+          {activeTab==='users' && (() => {
+            const list = users || [];
+            const q = userFind.trim().toLowerCase();
+            const shown = q ? list.filter((u) => `${u.name} ${u.uname} ${u.email} ${u.mobile} ${u.id}`.toLowerCase().includes(q)) : list;
+            const u = list.find((x) => x.id === userId) || null;
+            const row = (label, value, mono) => (
+              <div style={{display:'flex', padding:'12px 16px', borderBottom:'1px solid #f1f5f9', gap:12}}>
+                <div style={{width:150, color:'#6b7280', fontSize:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', paddingTop:2}}>{label}</div>
+                <div style={{flex:1, fontFamily: mono ? 'monospace' : 'inherit', fontSize:'14px', wordBreak:'break-all'}}>{value || <span style={{color:'#aaa'}}>–</span>}</div>
+              </div>
+            );
+            const smallBtn = {border:'1px solid #d1d5db', background:'white', borderRadius:'8px', padding:'4px 10px', fontSize:'12px', cursor:'pointer', marginLeft:8};
+            return (
+              <>
+                <h1 style={{fontSize:'28px', fontWeight:'bold', marginBottom:'20px'}}>User Details {users ? `(${list.length})` : ''}</h1>
+                <div style={{background:'white', padding:'16px', borderRadius:'10px', border:'1px solid #e5e7eb', marginBottom:'20px', display:'flex', gap:'12px', alignItems:'center', flexWrap:'wrap'}}>
+                  <label style={{fontWeight:'600'}}>Select User:</label>
+                  <input value={userFind} onChange={(e)=>setUserFind(e.target.value)} placeholder="Search name, username, email, mobile" style={{padding:'8px 12px', borderRadius:'8px', border:'1px solid #d1d5db', minWidth:'240px', fontSize:'14px'}} />
+                  <select value={userId} onChange={(e)=>setUserId(e.target.value)} style={{padding:'8px 12px', borderRadius:'8px', border:'1px solid #d1d5db', minWidth:'300px', fontSize:'16px'}}>
+                    {shown.map((x) => <option key={x.id} value={x.id}>{x.name || '(no name)'} — {x.uname || x.id}</option>)}
+                  </select>
+                </div>
+                {!users && <p style={{color:'#6b7280'}}>Loading users…</p>}
+                {users && !u && <p style={{color:'#6b7280'}}>No user selected.</p>}
+                {u && (
+                  <div style={{background:'white', borderRadius:'10px', border:'1px solid #e5e7eb', overflow:'hidden'}}>
+                    <div style={{padding:'14px 16px', fontWeight:'bold', background:'#f1f5f9', borderBottom:'1px solid #e5e7eb'}}>Login details</div>
+                    {row('Name', u.name)}
+                    {row('Username', <>{u.uname}{u.uname && <button type="button" onClick={()=>copyText('user', u.uname)} style={smallBtn}>{copied==='user' ? 'Copied' : 'Copy'}</button>}</>, true)}
+                    {row('Password',
+                      u.password_kind === 'plain'
+                        ? <>{showPw ? u.password : '•'.repeat(Math.min(Math.max(u.password.length, 6), 20))}
+                            <button type="button" onClick={()=>setShowPw((v)=>!v)} style={smallBtn}>{showPw ? 'Hide' : 'Show'}</button>
+                            <button type="button" onClick={()=>copyText('pw', u.password)} style={smallBtn}>{copied==='pw' ? 'Copied' : 'Copy'}</button></>
+                        : u.password_kind === 'hashed'
+                          ? <span style={{color:'#92400e'}}>Saved securely (hashed). It cannot be shown, only replaced.</span>
+                          : <span style={{color:'#b91c1c'}}>No password set</span>,
+                      u.password_kind === 'plain')}
+                    {row('Password type', u.password_kind === 'plain' ? 'Plain text (old account)' : u.password_kind === 'hashed' ? 'Hashed' : 'None')}
+                    {row('Temporary login', u.is_temp ? 'Yes' : 'No')}
+                    {row('Status', u.status)}
+                    {row('Email', u.email)}
+                    {row('Mobile', u.mobile)}
+                    {row('User ID', u.id, true)}
+                    {row('Created', u.created_at ? String(u.created_at).replace('T',' ').slice(0,19) : '')}
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {activeTab==='files' && (
             <>

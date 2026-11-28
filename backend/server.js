@@ -1324,6 +1324,22 @@ app.get('/api/admin/stats', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Users list for the Admin page ("User details"): who they are and how they log in.
+// Passwords saved hashed (scrypt) can NOT be turned back into text, so they are reported as hashed.
+// Only old plain-text passwords are shown, and only to someone who holds the admin key.
+app.get('/api/admin/users', adminAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT id, uname, name, email, mobile, status, is_temp, password, created_at FROM users ORDER BY created_at DESC, id DESC LIMIT 2000');
+    const data = rows.map((u) => {
+      const pw = u.password == null ? '' : String(u.password);
+      const kind = !pw ? 'none' : pw.startsWith('scrypt$') ? 'hashed' : 'plain';
+      return { id: u.id, uname: u.uname || '', name: u.name || '', email: u.email || '', mobile: u.mobile || '', status: u.status || '', is_temp: u.is_temp ? 1 : 0, created_at: u.created_at, password_kind: kind, password: kind === 'plain' ? pw : '' };
+    });
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 function getTree(dir, depth = 0, maxDepth = 4) {
   if (depth > maxDepth) return [];
   try {
